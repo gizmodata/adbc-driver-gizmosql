@@ -54,6 +54,8 @@ def gizmosql_server():
             "GIZMOSQL_PASSWORD": GIZMOSQL_PASSWORD,
             "TLS_ENABLED": "1",
             "PRINT_QUERIES": "1",
+            "DATABASE_FILENAME": ":memory:",
+            "INIT_SQL_COMMANDS": "CALL dbgen(sf=0.01);"
         },
         stdout=True,
         stderr=True,

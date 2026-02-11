@@ -16,7 +16,7 @@ pytestmark = pytest.mark.integration
 def conn(gizmosql_server, gizmosql_uri):
     """Create a DBAPI connection to the test GizmoSQL server."""
     from adbc_driver_gizmosql import dbapi as gizmosql
-    from tests.conftest import GIZMOSQL_PASSWORD, GIZMOSQL_USERNAME
+    from conftest import GIZMOSQL_PASSWORD, GIZMOSQL_USERNAME
 
     with gizmosql.connect(
         gizmosql_uri,
@@ -77,7 +77,7 @@ class TestConnectionContextManager:
 
     def test_fresh_connection(self, gizmosql_server, gizmosql_uri):
         from adbc_driver_gizmosql import dbapi as gizmosql
-        from tests.conftest import GIZMOSQL_PASSWORD, GIZMOSQL_USERNAME
+        from conftest import GIZMOSQL_PASSWORD, GIZMOSQL_USERNAME
 
         with gizmosql.connect(
             gizmosql_uri,
