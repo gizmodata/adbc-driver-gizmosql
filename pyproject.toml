@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project]
+name = "adbc-driver-gizmosql"
+version = "0.1.0"
+description = "Python ADBC driver for GizmoSQL with OAuth/SSO support"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.9"
+authors = [
+    { name = "GizmoData", email = "support@gizmodata.com" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+]
+dependencies = [
+    "adbc-driver-flightsql>=0.8.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/gizmodata/adbc-driver-gizmosql"
+Repository = "https://github.com/gizmodata/adbc-driver-gizmosql"
+Issues = "https://github.com/gizmodata/adbc-driver-gizmosql/issues"
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov",
+    "docker",
+]
+dev = [
+    "ruff",
+    "mypy",
+    "bumpver",
+    "build",
+]
+
+[tool.bumpver]
+current_version = "0.1.0"
+version_pattern = "MAJOR.MINOR.PATCH"
+commit_message = "bump version {old_version} -> {new_version}"
+commit = true
+tag = true
+tag_message = "v{new_version}"
+
+[tool.bumpver.file_patterns]
+"pyproject.toml" = [
+    '^version = "{version}"$',
+    '^current_version = "{version}"$',
+]
+"src/adbc_driver_gizmosql/_version.py" = [
+    '^__version__ = "{version}"$',
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: marks tests that require a running GizmoSQL server (deselect with '-m \"not integration\"')",
+]
