@@ -7,7 +7,7 @@ where = ["src"]
 
 [project]
 name = "adbc-driver-gizmosql"
-version = "0.1.1"
+version = "0.1.2"
 description = "Python ADBC driver for GizmoSQL with OAuth/SSO support"
 readme = "README.md"
 license = "Apache-2.0"
@@ -50,7 +50,7 @@ dev = [
 ]
 
 [tool.bumpver]
-current_version = "0.1.1"
+current_version = "0.1.2"
 version_pattern = "MAJOR.MINOR.PATCH"
 commit_message = "bump version {old_version} -> {new_version}"
 commit = true
