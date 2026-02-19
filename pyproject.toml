@@ -11,7 +11,7 @@ version = "1.0.2"
 description = "Python ADBC driver for GizmoSQL with OAuth/SSO support"
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [
     { name = "GizmoData", email = "support@gizmodata.com" },
 ]
@@ -19,11 +19,11 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Database",
 ]
 dependencies = [
@@ -68,7 +68,7 @@ tag_message = "v{new_version}"
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
