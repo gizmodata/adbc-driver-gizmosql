@@ -151,6 +151,38 @@ print(f"Token: {result.token}")
 print(f"Session: {result.session_uuid}")
 ```
 
+### Bulk ingest (load Arrow data into a table)
+
+The ADBC `adbc_ingest` method on the cursor lets you load Arrow tables, record
+batches, or record batch readers directly into GizmoSQL — no row-by-row INSERT needed:
+
+```python
+import pyarrow as pa
+from adbc_driver_gizmosql import dbapi as gizmosql
+
+# Build an Arrow table
+table = pa.table({
+    "id": [1, 2, 3],
+    "name": ["Alice", "Bob", "Charlie"],
+    "score": [95.0, 87.5, 91.2],
+})
+
+with gizmosql.connect("grpc+tls://localhost:31337",
+                      username="gizmosql_username",
+                      password="gizmosql_password",
+                      tls_skip_verify=True,
+                      ) as conn:
+    with conn.cursor() as cur:
+        # Create a new table and insert the data
+        cur.adbc_ingest("students", table, mode="create")
+
+        # Verify
+        cur.execute("SELECT * FROM students")
+        print(cur.fetch_arrow_table())
+```
+
+Supported modes: `"create"`, `"append"`, `"replace"`, `"create_append"`.
+
 ### Pandas integration
 
 ```python

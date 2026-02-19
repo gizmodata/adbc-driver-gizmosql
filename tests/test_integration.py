@@ -15,8 +15,9 @@ pytestmark = pytest.mark.integration
 @pytest.fixture(scope="session")
 def conn(gizmosql_server, gizmosql_uri):
     """Create a DBAPI connection to the test GizmoSQL server."""
-    from adbc_driver_gizmosql import dbapi as gizmosql
     from conftest import GIZMOSQL_PASSWORD, GIZMOSQL_USERNAME
+
+    from adbc_driver_gizmosql import dbapi as gizmosql
 
     with gizmosql.connect(
         gizmosql_uri,
@@ -146,12 +147,146 @@ class TestExecuteUpdate:
                 gizmosql.execute_update(cur, "DROP TABLE test_eu_update")
 
 
+class TestBulkIngest:
+    """Test ADBC bulk ingest (adbc_ingest) for loading Arrow data into tables."""
+
+    def test_ingest_create(self, conn):
+        """Test mode='create' — creates a new table and inserts data."""
+        import pyarrow as pa
+
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        table = pa.table({
+            "id": [1, 2, 3],
+            "name": ["alice", "bob", "charlie"],
+        })
+
+        with conn.cursor() as cur:
+            cur.adbc_ingest("test_ingest_create", table, mode="create")
+
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, name FROM test_ingest_create ORDER BY id")
+                result = cur.fetch_arrow_table()
+                assert result.num_rows == 3
+                assert result.column("id").to_pylist() == [1, 2, 3]
+                assert result.column("name").to_pylist() == ["alice", "bob", "charlie"]
+        finally:
+            with conn.cursor() as cur:
+                gizmosql.execute_update(cur, "DROP TABLE test_ingest_create")
+
+    def test_ingest_append(self, conn):
+        """Test mode='append' — appends data to an existing table."""
+        import pyarrow as pa
+
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        with conn.cursor() as cur:
+            gizmosql.execute_update(
+                cur, "CREATE TABLE test_ingest_append (id BIGINT, val DOUBLE)"
+            )
+
+        try:
+            batch1 = pa.table({"id": [1, 2], "val": [10.0, 20.0]})
+            batch2 = pa.table({"id": [3, 4], "val": [30.0, 40.0]})
+
+            with conn.cursor() as cur:
+                cur.adbc_ingest("test_ingest_append", batch1, mode="append")
+                cur.adbc_ingest("test_ingest_append", batch2, mode="append")
+
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, val FROM test_ingest_append ORDER BY id")
+                result = cur.fetch_arrow_table()
+                assert result.num_rows == 4
+                assert result.column("id").to_pylist() == [1, 2, 3, 4]
+                assert result.column("val").to_pylist() == [10.0, 20.0, 30.0, 40.0]
+        finally:
+            with conn.cursor() as cur:
+                gizmosql.execute_update(cur, "DROP TABLE test_ingest_append")
+
+    def test_ingest_create_append(self, conn):
+        """Test mode='create_append' — creates if needed, then appends."""
+        import pyarrow as pa
+
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        table = pa.table({"x": [100, 200]})
+
+        # First call creates the table
+        with conn.cursor() as cur:
+            cur.adbc_ingest("test_ingest_ca", table, mode="create_append")
+
+        try:
+            # Second call appends to the existing table
+            with conn.cursor() as cur:
+                cur.adbc_ingest("test_ingest_ca", table, mode="create_append")
+
+            with conn.cursor() as cur:
+                cur.execute("SELECT x FROM test_ingest_ca ORDER BY x")
+                result = cur.fetch_arrow_table()
+                assert result.num_rows == 4
+                assert result.column("x").to_pylist() == [100, 100, 200, 200]
+        finally:
+            with conn.cursor() as cur:
+                gizmosql.execute_update(cur, "DROP TABLE test_ingest_ca")
+
+    def test_ingest_replace(self, conn):
+        """Test mode='replace' — drops and recreates the table."""
+        import pyarrow as pa
+
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        original = pa.table({"a": [1, 2, 3]})
+        replacement = pa.table({"a": [99]})
+
+        with conn.cursor() as cur:
+            cur.adbc_ingest("test_ingest_replace", original, mode="create")
+
+        try:
+            with conn.cursor() as cur:
+                cur.adbc_ingest("test_ingest_replace", replacement, mode="replace")
+
+            with conn.cursor() as cur:
+                cur.execute("SELECT a FROM test_ingest_replace")
+                result = cur.fetch_arrow_table()
+                assert result.num_rows == 1
+                assert result.column("a")[0].as_py() == 99
+        finally:
+            with conn.cursor() as cur:
+                gizmosql.execute_update(cur, "DROP TABLE test_ingest_replace")
+
+    def test_ingest_record_batch(self, conn):
+        """Test ingesting a single RecordBatch (not a full Table)."""
+        import pyarrow as pa
+
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        batch = pa.record_batch(
+            {"id": [10, 20], "label": ["foo", "bar"]}
+        )
+
+        with conn.cursor() as cur:
+            cur.adbc_ingest("test_ingest_rb", batch, mode="create")
+
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, label FROM test_ingest_rb ORDER BY id")
+                result = cur.fetch_arrow_table()
+                assert result.num_rows == 2
+                assert result.column("id").to_pylist() == [10, 20]
+                assert result.column("label").to_pylist() == ["foo", "bar"]
+        finally:
+            with conn.cursor() as cur:
+                gizmosql.execute_update(cur, "DROP TABLE test_ingest_rb")
+
+
 class TestConnectionContextManager:
     """Test that the connection works properly as a context manager."""
 
     def test_fresh_connection(self, gizmosql_server, gizmosql_uri):
-        from adbc_driver_gizmosql import dbapi as gizmosql
         from conftest import GIZMOSQL_PASSWORD, GIZMOSQL_USERNAME
+
+        from adbc_driver_gizmosql import dbapi as gizmosql
 
         with gizmosql.connect(
             gizmosql_uri,
