@@ -27,6 +27,9 @@ ruff format src/ tests/
 python -m build
 ```
 
+## Testing Policy
+Integration tests (`tests/test_integration.py`) are very important. Any new or modified feature must have corresponding integration test coverage. Always run integration tests when making changes.
+
 ## Key Files
 - `src/adbc_driver_gizmosql/_oauth.py` — OAuth browser flow (stdlib only)
 - `src/adbc_driver_gizmosql/dbapi.py` — DBAPI 2.0 connect() wrapper
