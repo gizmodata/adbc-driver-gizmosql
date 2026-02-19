@@ -8,16 +8,25 @@ import pytest
 
 from adbc_driver_gizmosql._oauth import OAuthResult
 
+# All tests need to mock the three layers that connect() calls internally:
+#   1. adbc_driver_flightsql.connect  → creates the ADBC database
+#   2. adbc_driver_manager.AdbcConnection  → wraps it in a connection
+#   3. Connection  → our DBAPI wrapper
+_PATCH_DB = "adbc_driver_gizmosql.dbapi.adbc_driver_flightsql.connect"
+_PATCH_CONN = "adbc_driver_gizmosql.dbapi.adbc_driver_manager.AdbcConnection"
+_PATCH_CLS = "adbc_driver_gizmosql.dbapi.Connection"
+
 
 class TestConnect:
     """Tests for dbapi.connect()."""
 
-    @patch("adbc_driver_gizmosql.dbapi._flightsql_dbapi.connect")
-    def test_password_auth(self, mock_connect):
+    @patch(_PATCH_CLS)
+    @patch(_PATCH_CONN)
+    @patch(_PATCH_DB)
+    def test_password_auth(self, mock_db_connect, mock_adbc_conn, mock_conn_cls):
         from adbc_driver_gizmosql.dbapi import connect
 
-        mock_conn = MagicMock()
-        mock_connect.return_value = mock_conn
+        mock_conn_cls.return_value = MagicMock()
 
         result = connect(
             "grpc+tls://localhost:31337",
@@ -26,19 +35,20 @@ class TestConnect:
             tls_skip_verify=True,
         )
 
-        assert result == mock_conn
-        mock_connect.assert_called_once()
-        call_kwargs = mock_connect.call_args[1]
-        assert call_kwargs["db_kwargs"]["username"] == "myuser"
-        assert call_kwargs["db_kwargs"]["password"] == "mypass"
-        assert "adbc.flight.sql.client_option.tls_skip_verify" in call_kwargs["db_kwargs"]
+        assert result == mock_conn_cls.return_value
+        mock_db_connect.assert_called_once()
+        db_kwargs = mock_db_connect.call_args[1]["db_kwargs"]
+        assert db_kwargs["username"] == "myuser"
+        assert db_kwargs["password"] == "mypass"
+        assert "adbc.flight.sql.client_option.tls_skip_verify" in db_kwargs
 
-    @patch("adbc_driver_gizmosql.dbapi._flightsql_dbapi.connect")
-    def test_password_auth_no_tls_skip(self, mock_connect):
+    @patch(_PATCH_CLS)
+    @patch(_PATCH_CONN)
+    @patch(_PATCH_DB)
+    def test_password_auth_no_tls_skip(self, mock_db_connect, mock_adbc_conn, mock_conn_cls):
         from adbc_driver_gizmosql.dbapi import connect
 
-        mock_conn = MagicMock()
-        mock_connect.return_value = mock_conn
+        mock_conn_cls.return_value = MagicMock()
 
         connect(
             "grpc+tls://localhost:31337",
@@ -46,20 +56,21 @@ class TestConnect:
             password="mypass",
         )
 
-        call_kwargs = mock_connect.call_args[1]
-        assert "adbc.flight.sql.client_option.tls_skip_verify" not in call_kwargs["db_kwargs"]
+        db_kwargs = mock_db_connect.call_args[1]["db_kwargs"]
+        assert "adbc.flight.sql.client_option.tls_skip_verify" not in db_kwargs
 
+    @patch(_PATCH_CLS)
+    @patch(_PATCH_CONN)
+    @patch(_PATCH_DB)
     @patch("adbc_driver_gizmosql.dbapi.get_oauth_token")
-    @patch("adbc_driver_gizmosql.dbapi._flightsql_dbapi.connect")
-    def test_external_auth(self, mock_connect, mock_oauth):
+    def test_external_auth(self, mock_oauth, mock_db_connect, mock_adbc_conn, mock_conn_cls):
         from adbc_driver_gizmosql.dbapi import connect
 
         mock_oauth.return_value = OAuthResult(
             token="eyJ-id-token-from-idp",
             session_uuid="test-uuid",
         )
-        mock_conn = MagicMock()
-        mock_connect.return_value = mock_conn
+        mock_conn_cls.return_value = MagicMock()
 
         result = connect(
             "grpc+tls://localhost:31337",
@@ -67,7 +78,7 @@ class TestConnect:
             tls_skip_verify=True,
         )
 
-        assert result == mock_conn
+        assert result == mock_conn_cls.return_value
         mock_oauth.assert_called_once_with(
             host="localhost",
             port=31339,
@@ -76,17 +87,21 @@ class TestConnect:
             open_browser=True,
             oauth_url=None,
         )
-        call_kwargs = mock_connect.call_args[1]
-        assert call_kwargs["db_kwargs"]["username"] == "token"
-        assert call_kwargs["db_kwargs"]["password"] == "eyJ-id-token-from-idp"
+        db_kwargs = mock_db_connect.call_args[1]["db_kwargs"]
+        assert db_kwargs["username"] == "token"
+        assert db_kwargs["password"] == "eyJ-id-token-from-idp"
 
+    @patch(_PATCH_CLS)
+    @patch(_PATCH_CONN)
+    @patch(_PATCH_DB)
     @patch("adbc_driver_gizmosql.dbapi.get_oauth_token")
-    @patch("adbc_driver_gizmosql.dbapi._flightsql_dbapi.connect")
-    def test_external_auth_custom_oauth_port(self, mock_connect, mock_oauth):
+    def test_external_auth_custom_oauth_port(
+        self, mock_oauth, mock_db_connect, mock_adbc_conn, mock_conn_cls
+    ):
         from adbc_driver_gizmosql.dbapi import connect
 
         mock_oauth.return_value = OAuthResult(token="jwt", session_uuid="uuid")
-        mock_connect.return_value = MagicMock()
+        mock_conn_cls.return_value = MagicMock()
 
         connect(
             "grpc+tls://myserver.example.com:31337",
@@ -105,13 +120,17 @@ class TestConnect:
             oauth_url=None,
         )
 
+    @patch(_PATCH_CLS)
+    @patch(_PATCH_CONN)
+    @patch(_PATCH_DB)
     @patch("adbc_driver_gizmosql.dbapi.get_oauth_token")
-    @patch("adbc_driver_gizmosql.dbapi._flightsql_dbapi.connect")
-    def test_external_auth_explicit_oauth_url(self, mock_connect, mock_oauth):
+    def test_external_auth_explicit_oauth_url(
+        self, mock_oauth, mock_db_connect, mock_adbc_conn, mock_conn_cls
+    ):
         from adbc_driver_gizmosql.dbapi import connect
 
         mock_oauth.return_value = OAuthResult(token="jwt", session_uuid="uuid")
-        mock_connect.return_value = MagicMock()
+        mock_conn_cls.return_value = MagicMock()
 
         connect(
             "grpc+tls://localhost:31337",
@@ -128,11 +147,13 @@ class TestConnect:
         with pytest.raises(ValueError, match="Invalid auth_type"):
             connect("grpc+tls://localhost:31337", auth_type="kerberos")
 
-    @patch("adbc_driver_gizmosql.dbapi._flightsql_dbapi.connect")
-    def test_db_kwargs_passthrough(self, mock_connect):
+    @patch(_PATCH_CLS)
+    @patch(_PATCH_CONN)
+    @patch(_PATCH_DB)
+    def test_db_kwargs_passthrough(self, mock_db_connect, mock_adbc_conn, mock_conn_cls):
         from adbc_driver_gizmosql.dbapi import connect
 
-        mock_connect.return_value = MagicMock()
+        mock_conn_cls.return_value = MagicMock()
 
         connect(
             "grpc+tls://localhost:31337",
@@ -141,15 +162,17 @@ class TestConnect:
             db_kwargs={"custom_option": "custom_value"},
         )
 
-        call_kwargs = mock_connect.call_args[1]
-        assert call_kwargs["db_kwargs"]["custom_option"] == "custom_value"
-        assert call_kwargs["db_kwargs"]["username"] == "user"
+        db_kwargs = mock_db_connect.call_args[1]["db_kwargs"]
+        assert db_kwargs["custom_option"] == "custom_value"
+        assert db_kwargs["username"] == "user"
 
-    @patch("adbc_driver_gizmosql.dbapi._flightsql_dbapi.connect")
-    def test_conn_kwargs_passthrough(self, mock_connect):
+    @patch(_PATCH_CLS)
+    @patch(_PATCH_CONN)
+    @patch(_PATCH_DB)
+    def test_conn_kwargs_passthrough(self, mock_db_connect, mock_adbc_conn, mock_conn_cls):
         from adbc_driver_gizmosql.dbapi import connect
 
-        mock_connect.return_value = MagicMock()
+        mock_conn_cls.return_value = MagicMock()
 
         connect(
             "grpc+tls://localhost:31337",
@@ -158,23 +181,31 @@ class TestConnect:
             conn_kwargs={"conn_option": "conn_value"},
         )
 
-        call_kwargs = mock_connect.call_args[1]
-        assert call_kwargs["conn_kwargs"]["conn_option"] == "conn_value"
+        # conn_kwargs are unpacked into AdbcConnection
+        mock_adbc_conn.assert_called_once_with(
+            mock_db_connect.return_value,
+            conn_option="conn_value",
+        )
 
-    @patch("adbc_driver_gizmosql.dbapi._flightsql_dbapi.connect")
-    def test_autocommit_default_true(self, mock_connect):
+    @patch(_PATCH_CLS)
+    @patch(_PATCH_CONN)
+    @patch(_PATCH_DB)
+    def test_autocommit_default_true(self, mock_db_connect, mock_adbc_conn, mock_conn_cls):
         from adbc_driver_gizmosql.dbapi import connect
 
-        mock_connect.return_value = MagicMock()
+        mock_conn_cls.return_value = MagicMock()
 
         connect("grpc+tls://localhost:31337", username="u", password="p")
 
-        call_kwargs = mock_connect.call_args[1]
-        assert call_kwargs["autocommit"] is True
+        mock_conn_cls.assert_called_once_with(
+            mock_db_connect.return_value,
+            mock_adbc_conn.return_value,
+            autocommit=True,
+        )
 
 
 class TestExecuteUpdate:
-    """Tests for dbapi.execute_update()."""
+    """Tests for the module-level execute_update() backward-compat shim."""
 
     def test_execute_update_calls_adbc_statement(self):
         from adbc_driver_gizmosql.dbapi import execute_update
@@ -184,35 +215,58 @@ class TestExecuteUpdate:
 
         result = execute_update(mock_cursor, "INSERT INTO t VALUES (1)")
 
-        mock_cursor.adbc_statement.set_sql_query.assert_called_once_with(
-            "INSERT INTO t VALUES (1)"
-        )
+        mock_cursor.adbc_statement.set_sql_query.assert_called_once_with("INSERT INTO t VALUES (1)")
         mock_cursor.adbc_statement.execute_update.assert_called_once()
         assert result == 42
 
-    def test_execute_update_ddl_returns_minus_one(self):
+    def test_execute_update_ddl_returns_int(self):
         from adbc_driver_gizmosql.dbapi import execute_update
 
         mock_cursor = MagicMock()
-        mock_cursor.adbc_statement.execute_update.return_value = -1
+        mock_cursor.adbc_statement.execute_update.return_value = 0
 
         result = execute_update(mock_cursor, "CREATE TABLE t (a INT)")
 
-        mock_cursor.adbc_statement.set_sql_query.assert_called_once_with(
-            "CREATE TABLE t (a INT)"
-        )
-        assert result == -1
+        mock_cursor.adbc_statement.set_sql_query.assert_called_once_with("CREATE TABLE t (a INT)")
+        assert result == 0
 
     def test_execute_update_propagates_exception(self):
         from adbc_driver_gizmosql.dbapi import execute_update
 
         mock_cursor = MagicMock()
-        mock_cursor.adbc_statement.execute_update.side_effect = RuntimeError(
-            "server error"
-        )
+        mock_cursor.adbc_statement.execute_update.side_effect = RuntimeError("server error")
 
         with pytest.raises(RuntimeError, match="server error"):
             execute_update(mock_cursor, "DROP TABLE nonexistent")
+
+
+class TestCursorExecuteUpdate:
+    """Tests for Cursor.execute_update() method."""
+
+    def test_execute_update_calls_adbc_statement(self):
+        from adbc_driver_gizmosql.dbapi import Cursor
+
+        cursor = MagicMock(spec=Cursor)
+        cursor.adbc_statement = MagicMock()
+        cursor.adbc_statement.execute_update.return_value = 3
+
+        # Call the real method on the mock instance
+        result = Cursor.execute_update(cursor, "INSERT INTO t VALUES (1)")
+
+        cursor.adbc_statement.set_sql_query.assert_called_once_with("INSERT INTO t VALUES (1)")
+        cursor.adbc_statement.execute_update.assert_called_once()
+        assert result == 3
+
+    def test_execute_update_ddl(self):
+        from adbc_driver_gizmosql.dbapi import Cursor
+
+        cursor = MagicMock(spec=Cursor)
+        cursor.adbc_statement = MagicMock()
+        cursor.adbc_statement.execute_update.return_value = 0
+
+        result = Cursor.execute_update(cursor, "CREATE TABLE t (a INT)")
+
+        assert result == 0
 
 
 class TestExtractHost:

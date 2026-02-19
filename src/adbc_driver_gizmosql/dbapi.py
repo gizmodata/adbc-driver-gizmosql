@@ -26,8 +26,8 @@ Example (DDL/DML — executes immediately without fetching)::
                           username="user", password="pass",
                           tls_skip_verify=True) as conn:
         with conn.cursor() as cur:
-            gizmosql.execute_update(cur, "CREATE TABLE t (a INT)")
-            rows_affected = gizmosql.execute_update(cur, "INSERT INTO t VALUES (1)")
+            cur.execute_update("CREATE TABLE t (a INT)")
+            rows_affected = cur.execute_update("INSERT INTO t VALUES (1)")
             print(f"Rows affected: {rows_affected}")
 
 Example (OAuth/SSO)::
@@ -44,15 +44,20 @@ Example (OAuth/SSO)::
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
+import adbc_driver_flightsql
+import adbc_driver_manager
 from adbc_driver_flightsql import DatabaseOptions
-from adbc_driver_flightsql import dbapi as _flightsql_dbapi
+from adbc_driver_flightsql.dbapi import (
+    Connection as _BaseConnection,
+)
+from adbc_driver_flightsql.dbapi import (
+    Cursor as _BaseCursor,
+)
 
 # Re-export all DBAPI 2.0 symbols from the underlying driver
 from adbc_driver_flightsql.dbapi import (  # noqa: F401
-    Connection,
-    Cursor,
     Date,
     DateFromTicks,
     Time,
@@ -65,6 +70,52 @@ from adbc_driver_flightsql.dbapi import (  # noqa: F401
 )
 
 from ._oauth import DEFAULT_OAUTH_PORT, get_oauth_token
+
+
+class Cursor(_BaseCursor):
+    """GizmoSQL cursor with ``execute_update()`` support."""
+
+    def execute_update(self, query: str) -> int:
+        """Execute a DDL/DML statement immediately and return the rows affected.
+
+        This calls the ADBC statement's ``execute_update()`` method directly
+        (the server's ``DoPutPreparedStatementUpdate`` RPC).  Unlike
+        ``cursor.execute()``, this fires the statement immediately on the
+        server **without requiring a fetch**, making it the preferred way to
+        run DDL (``CREATE``, ``DROP``, ``ALTER``) and DML (``INSERT``,
+        ``UPDATE``, ``DELETE``) statements with GizmoSQL's lazy-execution
+        model.
+
+        Args:
+            query: The SQL DDL or DML statement to execute.
+
+        Returns:
+            The number of rows affected (``0`` for DDL statements that do not
+            affect rows).
+
+        Example::
+
+            with conn.cursor() as cur:
+                cur.execute_update("CREATE TABLE t (a INT)")
+                rows = cur.execute_update("INSERT INTO t VALUES (1)")
+                print(f"Rows affected: {rows}")
+        """
+        self.adbc_statement.set_sql_query(query)
+        return self.adbc_statement.execute_update()
+
+
+class Connection(_BaseConnection):
+    """GizmoSQL connection that returns :class:`Cursor` instances."""
+
+    def cursor(
+        self,
+        *,
+        adbc_stmt_kwargs: Optional[dict[str, Any]] = None,
+    ) -> Cursor:
+        """Create a new :class:`Cursor` for querying the database."""
+        cursor = Cursor(self, adbc_stmt_kwargs, dbapi_backend=self._backend)
+        self._cursors.add(cursor)
+        return cursor
 
 
 def connect(
@@ -106,7 +157,7 @@ def connect(
         autocommit: Enable autocommit (default: True).
 
     Returns:
-        A DBAPI 2.0 Connection object.
+        A DBAPI 2.0 :class:`Connection` object.
 
     Raises:
         GizmoSQLOAuthError: If the OAuth flow fails.
@@ -148,43 +199,43 @@ def connect(
         if password is not None:
             db_kwargs.setdefault("password", password)
     else:
-        raise ValueError(
-            f"Invalid auth_type: {auth_type!r}. Must be 'password' or 'external'."
-        )
+        raise ValueError(f"Invalid auth_type: {auth_type!r}. Must be 'password' or 'external'.")
 
-    return _flightsql_dbapi.connect(
-        uri,
-        db_kwargs=db_kwargs,
-        conn_kwargs=conn_kwargs,
-        autocommit=autocommit,
-    )
+    db = None
+    conn = None
+    try:
+        db = adbc_driver_flightsql.connect(uri, db_kwargs=db_kwargs)
+        conn = adbc_driver_manager.AdbcConnection(db, **(conn_kwargs or {}))
+        return Connection(db, conn, autocommit=autocommit)
+    except Exception:
+        if conn:
+            conn.close()
+        if db:
+            db.close()
+        raise
 
 
 def execute_update(cursor: Cursor, query: str) -> int:
     """Execute a DDL/DML statement immediately and return the rows affected.
 
-    This is a convenience wrapper that calls the ADBC statement's
-    ``execute_update()`` method directly (the server's
-    ``DoPutPreparedStatementUpdate`` RPC).  Unlike ``cursor.execute()``,
-    this fires the statement immediately on the server **without requiring
-    a fetch**, making it the preferred way to run DDL (``CREATE``, ``DROP``,
-    ``ALTER``) and DML (``INSERT``, ``UPDATE``, ``DELETE``) statements with
-    GizmoSQL's lazy-execution model.
+    .. deprecated::
+        Use ``cursor.execute_update(query)`` instead.
+
+    This is a backward-compatible wrapper.  New code should call
+    ``cursor.execute_update(query)`` directly.
 
     Args:
         cursor: An open DBAPI 2.0 cursor obtained from ``connection.cursor()``.
         query: The SQL DDL or DML statement to execute.
 
     Returns:
-        The number of rows affected (``-1`` when the server does not report
-        a count, e.g. for DDL statements).
+        The number of rows affected (``0`` for DDL statements that do not
+        affect rows).
 
     Example::
 
         with conn.cursor() as cur:
-            gizmosql.execute_update(cur, "CREATE TABLE t (a INT)")
             rows = gizmosql.execute_update(cur, "INSERT INTO t VALUES (1)")
-            print(f"Rows affected: {rows}")
     """
     cursor.adbc_statement.set_sql_query(query)
     return cursor.adbc_statement.execute_update()

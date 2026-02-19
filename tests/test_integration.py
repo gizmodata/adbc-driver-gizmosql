@@ -74,31 +74,26 @@ class TestPasswordAuth:
 
 
 class TestExecuteUpdate:
-    """Test execute_update() for DDL/DML that fires immediately."""
+    """Test cursor.execute_update() for DDL/DML that fires immediately."""
 
     def test_create_insert_query_drop(self, conn):
-        from adbc_driver_gizmosql import dbapi as gizmosql
-
         with conn.cursor() as cur:
             # DDL — CREATE TABLE
-            result = gizmosql.execute_update(
-                cur, "CREATE TABLE test_exec_update (id INT, name VARCHAR)"
+            result = cur.execute_update(
+                "CREATE TABLE test_exec_update (id INT, name VARCHAR)"
             )
-            # DDL typically returns -1 (no row count)
-            assert isinstance(result, int)
+            assert result == 0
 
         try:
             with conn.cursor() as cur:
                 # DML — INSERT single row
-                rows = gizmosql.execute_update(
-                    cur,
+                rows = cur.execute_update(
                     "INSERT INTO test_exec_update VALUES (1, 'alice')",
                 )
                 assert rows == 1
 
                 # DML — INSERT another row
-                rows = gizmosql.execute_update(
-                    cur,
+                rows = cur.execute_update(
                     "INSERT INTO test_exec_update VALUES (2, 'bob')",
                 )
                 assert rows == 1
@@ -115,36 +110,46 @@ class TestExecuteUpdate:
         finally:
             # Clean up
             with conn.cursor() as cur:
-                gizmosql.execute_update(cur, "DROP TABLE test_exec_update")
+                cur.execute_update("DROP TABLE test_exec_update")
 
     def test_update_returns_rows_affected(self, conn):
-        from adbc_driver_gizmosql import dbapi as gizmosql
-
         with conn.cursor() as cur:
-            gizmosql.execute_update(
-                cur, "CREATE TABLE test_eu_update (val INT)"
-            )
+            cur.execute_update("CREATE TABLE test_eu_update (val INT)")
 
         try:
             with conn.cursor() as cur:
-                gizmosql.execute_update(
-                    cur, "INSERT INTO test_eu_update VALUES (1)"
-                )
-                gizmosql.execute_update(
-                    cur, "INSERT INTO test_eu_update VALUES (2)"
-                )
-                gizmosql.execute_update(
-                    cur, "INSERT INTO test_eu_update VALUES (3)"
-                )
+                cur.execute_update("INSERT INTO test_eu_update VALUES (1)")
+                cur.execute_update("INSERT INTO test_eu_update VALUES (2)")
+                cur.execute_update("INSERT INTO test_eu_update VALUES (3)")
 
             with conn.cursor() as cur:
-                rows = gizmosql.execute_update(
-                    cur, "DELETE FROM test_eu_update WHERE val >= 2"
+                rows = cur.execute_update(
+                    "DELETE FROM test_eu_update WHERE val >= 2"
                 )
                 assert rows == 2
         finally:
             with conn.cursor() as cur:
-                gizmosql.execute_update(cur, "DROP TABLE test_eu_update")
+                cur.execute_update("DROP TABLE test_eu_update")
+
+    def test_module_level_execute_update_backward_compat(self, conn):
+        """Verify the module-level execute_update() shim still works."""
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        with conn.cursor() as cur:
+            result = gizmosql.execute_update(
+                cur, "CREATE TABLE test_eu_compat (id INT)"
+            )
+            assert isinstance(result, int)
+
+        try:
+            with conn.cursor() as cur:
+                rows = gizmosql.execute_update(
+                    cur, "INSERT INTO test_eu_compat VALUES (1)"
+                )
+                assert rows == 1
+        finally:
+            with conn.cursor() as cur:
+                gizmosql.execute_update(cur, "DROP TABLE test_eu_compat")
 
 
 class TestBulkIngest:
@@ -153,8 +158,6 @@ class TestBulkIngest:
     def test_ingest_create(self, conn):
         """Test mode='create' — creates a new table and inserts data."""
         import pyarrow as pa
-
-        from adbc_driver_gizmosql import dbapi as gizmosql
 
         table = pa.table({
             "id": [1, 2, 3],
@@ -173,17 +176,15 @@ class TestBulkIngest:
                 assert result.column("name").to_pylist() == ["alice", "bob", "charlie"]
         finally:
             with conn.cursor() as cur:
-                gizmosql.execute_update(cur, "DROP TABLE test_ingest_create")
+                cur.execute_update("DROP TABLE test_ingest_create")
 
     def test_ingest_append(self, conn):
         """Test mode='append' — appends data to an existing table."""
         import pyarrow as pa
 
-        from adbc_driver_gizmosql import dbapi as gizmosql
-
         with conn.cursor() as cur:
-            gizmosql.execute_update(
-                cur, "CREATE TABLE test_ingest_append (id BIGINT, val DOUBLE)"
+            cur.execute_update(
+                "CREATE TABLE test_ingest_append (id BIGINT, val DOUBLE)"
             )
 
         try:
@@ -202,13 +203,11 @@ class TestBulkIngest:
                 assert result.column("val").to_pylist() == [10.0, 20.0, 30.0, 40.0]
         finally:
             with conn.cursor() as cur:
-                gizmosql.execute_update(cur, "DROP TABLE test_ingest_append")
+                cur.execute_update("DROP TABLE test_ingest_append")
 
     def test_ingest_create_append(self, conn):
         """Test mode='create_append' — creates if needed, then appends."""
         import pyarrow as pa
-
-        from adbc_driver_gizmosql import dbapi as gizmosql
 
         table = pa.table({"x": [100, 200]})
 
@@ -228,13 +227,11 @@ class TestBulkIngest:
                 assert result.column("x").to_pylist() == [100, 100, 200, 200]
         finally:
             with conn.cursor() as cur:
-                gizmosql.execute_update(cur, "DROP TABLE test_ingest_ca")
+                cur.execute_update("DROP TABLE test_ingest_ca")
 
     def test_ingest_replace(self, conn):
         """Test mode='replace' — drops and recreates the table."""
         import pyarrow as pa
-
-        from adbc_driver_gizmosql import dbapi as gizmosql
 
         original = pa.table({"a": [1, 2, 3]})
         replacement = pa.table({"a": [99]})
@@ -253,13 +250,11 @@ class TestBulkIngest:
                 assert result.column("a")[0].as_py() == 99
         finally:
             with conn.cursor() as cur:
-                gizmosql.execute_update(cur, "DROP TABLE test_ingest_replace")
+                cur.execute_update("DROP TABLE test_ingest_replace")
 
     def test_ingest_record_batch(self, conn):
         """Test ingesting a single RecordBatch (not a full Table)."""
         import pyarrow as pa
-
-        from adbc_driver_gizmosql import dbapi as gizmosql
 
         batch = pa.record_batch(
             {"id": [10, 20], "label": ["foo", "bar"]}
@@ -277,7 +272,7 @@ class TestBulkIngest:
                 assert result.column("label").to_pylist() == ["foo", "bar"]
         finally:
             with conn.cursor() as cur:
-                gizmosql.execute_update(cur, "DROP TABLE test_ingest_rb")
+                cur.execute_update("DROP TABLE test_ingest_rb")
 
 
 class TestConnectionContextManager:
