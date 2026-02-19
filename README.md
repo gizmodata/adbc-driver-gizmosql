@@ -65,6 +65,7 @@ docker run --name gizmosql \
            --init \
            --publish 31337:31337 \
            --env TLS_ENABLED="1" \
+           --env GIZMOSQL_USERNAME="gizmosql_user" \
            --env GIZMOSQL_PASSWORD="gizmosql_password" \
            --env PRINT_QUERIES="1" \
            --pull missing \
@@ -77,7 +78,7 @@ docker run --name gizmosql \
 from adbc_driver_gizmosql import dbapi as gizmosql
 
 with gizmosql.connect("grpc+tls://localhost:31337",
-                      username="gizmosql_username",
+                      username="gizmosql_user",
                       password="gizmosql_password",
                       tls_skip_verify=True,
                       ) as conn:
@@ -100,7 +101,7 @@ and returning the number of rows affected:
 from adbc_driver_gizmosql import dbapi as gizmosql
 
 with gizmosql.connect("grpc+tls://localhost:31337",
-                      username="gizmosql_username",
+                      username="gizmosql_user",
                       password="gizmosql_password",
                       tls_skip_verify=True,
                       ) as conn:
@@ -168,7 +169,7 @@ table = pa.table({
 })
 
 with gizmosql.connect("grpc+tls://localhost:31337",
-                      username="gizmosql_username",
+                      username="gizmosql_user",
                       password="gizmosql_password",
                       tls_skip_verify=True,
                       ) as conn:
@@ -190,7 +191,7 @@ import pandas as pd
 from adbc_driver_gizmosql import dbapi as gizmosql
 
 with gizmosql.connect("grpc+tls://localhost:31337",
-                      username="gizmosql_username",
+                      username="gizmosql_user",
                       password="gizmosql_password",
                       tls_skip_verify=True,
                       ) as conn:
