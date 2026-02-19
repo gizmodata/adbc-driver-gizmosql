@@ -127,6 +127,13 @@ class TestExecuteUpdate:
                     "DELETE FROM test_eu_update WHERE val >= 2"
                 )
                 assert rows == 2
+
+            # Verify only the expected row survives
+            with conn.cursor() as cur:
+                cur.execute("SELECT val FROM test_eu_update ORDER BY val")
+                table = cur.fetch_arrow_table()
+                assert table.num_rows == 1
+                assert table.column("val")[0].as_py() == 1
         finally:
             with conn.cursor() as cur:
                 cur.execute_update("DROP TABLE test_eu_update")
