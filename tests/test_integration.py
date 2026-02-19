@@ -72,6 +72,80 @@ class TestPasswordAuth:
             assert table.num_rows == 5
 
 
+class TestExecuteUpdate:
+    """Test execute_update() for DDL/DML that fires immediately."""
+
+    def test_create_insert_query_drop(self, conn):
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        with conn.cursor() as cur:
+            # DDL — CREATE TABLE
+            result = gizmosql.execute_update(
+                cur, "CREATE TABLE test_exec_update (id INT, name VARCHAR)"
+            )
+            # DDL typically returns -1 (no row count)
+            assert isinstance(result, int)
+
+        try:
+            with conn.cursor() as cur:
+                # DML — INSERT single row
+                rows = gizmosql.execute_update(
+                    cur,
+                    "INSERT INTO test_exec_update VALUES (1, 'alice')",
+                )
+                assert rows == 1
+
+                # DML — INSERT another row
+                rows = gizmosql.execute_update(
+                    cur,
+                    "INSERT INTO test_exec_update VALUES (2, 'bob')",
+                )
+                assert rows == 1
+
+            # Verify the data was actually written
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, name FROM test_exec_update ORDER BY id"
+                )
+                table = cur.fetch_arrow_table()
+                assert table.num_rows == 2
+                assert table.column("id")[0].as_py() == 1
+                assert table.column("name")[1].as_py() == "bob"
+        finally:
+            # Clean up
+            with conn.cursor() as cur:
+                gizmosql.execute_update(cur, "DROP TABLE test_exec_update")
+
+    def test_update_returns_rows_affected(self, conn):
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        with conn.cursor() as cur:
+            gizmosql.execute_update(
+                cur, "CREATE TABLE test_eu_update (val INT)"
+            )
+
+        try:
+            with conn.cursor() as cur:
+                gizmosql.execute_update(
+                    cur, "INSERT INTO test_eu_update VALUES (1)"
+                )
+                gizmosql.execute_update(
+                    cur, "INSERT INTO test_eu_update VALUES (2)"
+                )
+                gizmosql.execute_update(
+                    cur, "INSERT INTO test_eu_update VALUES (3)"
+                )
+
+            with conn.cursor() as cur:
+                rows = gizmosql.execute_update(
+                    cur, "DELETE FROM test_eu_update WHERE val >= 2"
+                )
+                assert rows == 2
+        finally:
+            with conn.cursor() as cur:
+                gizmosql.execute_update(cur, "DROP TABLE test_eu_update")
+
+
 class TestConnectionContextManager:
     """Test that the connection works properly as a context manager."""
 

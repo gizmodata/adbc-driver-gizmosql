@@ -173,6 +173,48 @@ class TestConnect:
         assert call_kwargs["autocommit"] is True
 
 
+class TestExecuteUpdate:
+    """Tests for dbapi.execute_update()."""
+
+    def test_execute_update_calls_adbc_statement(self):
+        from adbc_driver_gizmosql.dbapi import execute_update
+
+        mock_cursor = MagicMock()
+        mock_cursor.adbc_statement.execute_update.return_value = 42
+
+        result = execute_update(mock_cursor, "INSERT INTO t VALUES (1)")
+
+        mock_cursor.adbc_statement.set_sql_query.assert_called_once_with(
+            "INSERT INTO t VALUES (1)"
+        )
+        mock_cursor.adbc_statement.execute_update.assert_called_once()
+        assert result == 42
+
+    def test_execute_update_ddl_returns_minus_one(self):
+        from adbc_driver_gizmosql.dbapi import execute_update
+
+        mock_cursor = MagicMock()
+        mock_cursor.adbc_statement.execute_update.return_value = -1
+
+        result = execute_update(mock_cursor, "CREATE TABLE t (a INT)")
+
+        mock_cursor.adbc_statement.set_sql_query.assert_called_once_with(
+            "CREATE TABLE t (a INT)"
+        )
+        assert result == -1
+
+    def test_execute_update_propagates_exception(self):
+        from adbc_driver_gizmosql.dbapi import execute_update
+
+        mock_cursor = MagicMock()
+        mock_cursor.adbc_statement.execute_update.side_effect = RuntimeError(
+            "server error"
+        )
+
+        with pytest.raises(RuntimeError, match="server error"):
+            execute_update(mock_cursor, "DROP TABLE nonexistent")
+
+
 class TestExtractHost:
     """Tests for URI host extraction."""
 

@@ -18,6 +18,18 @@ Example (password auth)::
             cur.execute("SELECT 1")
             print(cur.fetch_arrow_table())
 
+Example (DDL/DML — executes immediately without fetching)::
+
+    from adbc_driver_gizmosql import dbapi as gizmosql
+
+    with gizmosql.connect("grpc+tls://localhost:31337",
+                          username="user", password="pass",
+                          tls_skip_verify=True) as conn:
+        with conn.cursor() as cur:
+            gizmosql.execute_update(cur, "CREATE TABLE t (a INT)")
+            rows_affected = gizmosql.execute_update(cur, "INSERT INTO t VALUES (1)")
+            print(f"Rows affected: {rows_affected}")
+
 Example (OAuth/SSO)::
 
     from adbc_driver_gizmosql import dbapi as gizmosql
@@ -146,6 +158,36 @@ def connect(
         conn_kwargs=conn_kwargs,
         autocommit=autocommit,
     )
+
+
+def execute_update(cursor: Cursor, query: str) -> int:
+    """Execute a DDL/DML statement immediately and return the rows affected.
+
+    This is a convenience wrapper that calls the ADBC statement's
+    ``execute_update()`` method directly (the server's
+    ``DoPutPreparedStatementUpdate`` RPC).  Unlike ``cursor.execute()``,
+    this fires the statement immediately on the server **without requiring
+    a fetch**, making it the preferred way to run DDL (``CREATE``, ``DROP``,
+    ``ALTER``) and DML (``INSERT``, ``UPDATE``, ``DELETE``) statements with
+    GizmoSQL's lazy-execution model.
+
+    Args:
+        cursor: An open DBAPI 2.0 cursor obtained from ``connection.cursor()``.
+        query: The SQL DDL or DML statement to execute.
+
+    Returns:
+        The number of rows affected (``-1`` when the server does not report
+        a count, e.g. for DDL statements).
+
+    Example::
+
+        with conn.cursor() as cur:
+            gizmosql.execute_update(cur, "CREATE TABLE t (a INT)")
+            rows = gizmosql.execute_update(cur, "INSERT INTO t VALUES (1)")
+            print(f"Rows affected: {rows}")
+    """
+    cursor.adbc_statement.set_sql_query(query)
+    return cursor.adbc_statement.execute_update()
 
 
 def _extract_host(uri: str) -> str:

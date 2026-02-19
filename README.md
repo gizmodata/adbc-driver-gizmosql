@@ -88,6 +88,31 @@ with gizmosql.connect("grpc+tls://localhost:31337",
         print(table)
 ```
 
+### DDL/DML — execute immediately without fetching
+
+GizmoSQL uses a lazy-execution model, so a plain `cursor.execute()` for DDL/DML
+requires a subsequent fetch to actually fire the statement on the server.
+`execute_update()` bypasses this by calling the server's
+`DoPutPreparedStatementUpdate` RPC directly, executing the statement immediately
+and returning the number of rows affected:
+
+```python
+from adbc_driver_gizmosql import dbapi as gizmosql
+
+with gizmosql.connect("grpc+tls://localhost:31337",
+                      username="gizmosql_username",
+                      password="gizmosql_password",
+                      tls_skip_verify=True,
+                      ) as conn:
+    with conn.cursor() as cur:
+        # DDL — returns -1 (no row count)
+        gizmosql.execute_update(cur, "CREATE TABLE t (a INT)")
+
+        # DML — returns the number of rows affected
+        rows_affected = gizmosql.execute_update(cur, "INSERT INTO t VALUES (1)")
+        print(f"Rows affected: {rows_affected}")
+```
+
 ### OAuth/SSO authentication
 
 When your GizmoSQL server is configured with OAuth, simply change `auth_type`:
@@ -160,6 +185,17 @@ with gizmosql.connect("grpc+tls://localhost:31337",
 | `db_kwargs` | `dict` | `None` | Extra ADBC database options |
 | `conn_kwargs` | `dict` | `None` | Extra ADBC connection options |
 | `autocommit` | `bool` | `True` | Enable autocommit |
+
+### `dbapi.execute_update()`
+
+Execute a DDL/DML statement immediately without fetching. Use this instead of `cursor.execute()` for statements that don't return result sets — it fires the statement on the server right away, bypassing GizmoSQL's lazy-execution model.
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `cursor` | `Cursor` | *required* | An open DBAPI 2.0 cursor |
+| `query` | `str` | *required* | SQL DDL or DML statement to execute |
+
+Returns: `int` — number of rows affected (`-1` when the server does not report a count, e.g. for DDL)
 
 ### `get_oauth_token()`
 
