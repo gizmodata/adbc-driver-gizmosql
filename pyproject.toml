@@ -27,8 +27,8 @@ classifiers = [
     "Topic :: Database",
 ]
 dependencies = [
-    "adbc-driver-flightsql==1.10.0",
-    "pyarrow>=21.0.0"
+    "adbc-driver-flightsql>=1.10.*",
+    "pyarrow>=23.0.*"
 ]
 
 [project.urls]
