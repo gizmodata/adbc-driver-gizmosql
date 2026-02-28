@@ -42,6 +42,12 @@ Integration tests (`tests/test_integration.py`) are very important. Any new or m
 - The `_oauth.py` module uses only stdlib (`urllib.request`, `json`, `ssl`, `webbrowser`)
 - `dbapi.py` re-exports all DBAPI 2.0 symbols from `adbc_driver_flightsql.dbapi`
 
+## Changelog
+- **Always update `CHANGELOG.md`** when making changes — new features, bug fixes, breaking changes
+- Follow [Keep a Changelog](https://keepachangelog.com/) format with `[Unreleased]` section
+- When releasing, move `[Unreleased]` entries to a versioned section (e.g., `[1.1.0] - 2026-02-28`)
+- CI skips on CHANGELOG-only changes (`paths-ignore`), but README changes still trigger CI (used by the Python packager)
+
 ## Version Management
 - Version is in `pyproject.toml` and `src/adbc_driver_gizmosql/_version.py`
 - Use `bumpver update --patch` (or `--minor`/`--major`) to bump — it auto-commits and tags
