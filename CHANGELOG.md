@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-02-28
+
 ### Changed
 - `cursor.execute()` now auto-detects DDL/DML statements by SQL keyword and executes them immediately on the server via the `DoPut` RPC, matching the behavior of the GizmoSQL JDBC and ODBC drivers. Previously, DDL/DML via `execute()` was never executed due to GizmoSQL's lazy-execution model (the `GetFlightInfo` RPC only plans, and `DoGet` is never called for DDL/DML).
 - `cursor.execute_update()` remains available for explicit DDL/DML execution when the rows-affected count is needed as a return value.
