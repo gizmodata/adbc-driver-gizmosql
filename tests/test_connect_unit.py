@@ -240,6 +240,157 @@ class TestExecuteUpdate:
             execute_update(mock_cursor, "DROP TABLE nonexistent")
 
 
+class TestIsDdlDml:
+    """Tests for _is_ddl_dml() SQL keyword detection."""
+
+    def test_create_table(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("CREATE TABLE t (a INT)") is True
+
+    def test_drop_table(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("DROP TABLE t") is True
+
+    def test_insert(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("INSERT INTO t VALUES (1)") is True
+
+    def test_update(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("UPDATE t SET a = 1") is True
+
+    def test_delete(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("DELETE FROM t WHERE a = 1") is True
+
+    def test_alter(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("ALTER TABLE t ADD COLUMN b INT") is True
+
+    def test_select_is_not_ddl_dml(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("SELECT 1") is False
+
+    def test_with_cte_is_not_ddl_dml(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("WITH cte AS (SELECT 1) SELECT * FROM cte") is False
+
+    def test_show_is_not_ddl_dml(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("SHOW TABLES") is False
+
+    def test_leading_whitespace(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("   CREATE TABLE t (a INT)") is True
+
+    def test_lowercase(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("create table t (a INT)") is True
+
+    def test_mixed_case(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("Create Table t (a INT)") is True
+
+    def test_empty_string(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("") is False
+
+    def test_bytes_not_ddl_dml(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml(b"CREATE TABLE t (a INT)") is False
+
+    def test_truncate(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("TRUNCATE TABLE t") is True
+
+    def test_merge(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("MERGE INTO t USING s ON t.id = s.id") is True
+
+    def test_copy(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("COPY t FROM '/tmp/data.csv'") is True
+
+
+class TestCursorExecute:
+    """Tests for Cursor.execute() auto-detection of DDL/DML."""
+
+    def test_execute_ddl_calls_execute_update(self):
+        """DDL is routed through execute_update (DoPut), not super().execute()."""
+        from adbc_driver_gizmosql.dbapi import Cursor
+
+        cursor = MagicMock(spec=Cursor)
+        cursor.adbc_statement = MagicMock()
+        cursor.adbc_statement.execute_update.return_value = 0
+
+        result = Cursor.execute(cursor, "CREATE TABLE t (a INT)")
+
+        cursor.adbc_statement.set_sql_query.assert_called_once_with("CREATE TABLE t (a INT)")
+        cursor.adbc_statement.execute_update.assert_called_once()
+        assert cursor._results is None
+        assert result is cursor
+
+    def test_execute_insert_calls_execute_update(self):
+        """DML is routed through execute_update."""
+        from adbc_driver_gizmosql.dbapi import Cursor
+
+        cursor = MagicMock(spec=Cursor)
+        cursor.adbc_statement = MagicMock()
+        cursor.adbc_statement.execute_update.return_value = 1
+
+        result = Cursor.execute(cursor, "INSERT INTO t VALUES (1)")
+
+        cursor.adbc_statement.set_sql_query.assert_called_once_with("INSERT INTO t VALUES (1)")
+        cursor.adbc_statement.execute_update.assert_called_once()
+        assert cursor._rowcount == 1
+        assert result is cursor
+
+    @patch("adbc_driver_flightsql.dbapi.Cursor.execute")
+    def test_execute_select_uses_standard_path(self, mock_super_execute):
+        """SELECT uses the standard lazy-execution path (super().execute)."""
+        from adbc_driver_gizmosql.dbapi import Cursor
+
+        cursor = MagicMock(spec=Cursor)
+        cursor.adbc_statement = MagicMock()
+
+        result = Cursor.execute(cursor, "SELECT 1")
+
+        mock_super_execute.assert_called_once_with("SELECT 1", None)
+        cursor.adbc_statement.execute_update.assert_not_called()
+        assert result is cursor
+
+    @patch("adbc_driver_flightsql.dbapi.Cursor.execute")
+    def test_execute_with_parameters_uses_standard_path(self, mock_super_execute):
+        """DDL/DML keywords with parameters use the standard path (parameterized query)."""
+        from adbc_driver_gizmosql.dbapi import Cursor
+
+        cursor = MagicMock(spec=Cursor)
+        cursor.adbc_statement = MagicMock()
+
+        result = Cursor.execute(cursor, "INSERT INTO t VALUES (?)", parameters=[1])
+
+        mock_super_execute.assert_called_once_with("INSERT INTO t VALUES (?)", [1])
+        cursor.adbc_statement.execute_update.assert_not_called()
+        assert result is cursor
+
+
 class TestCursorExecuteUpdate:
     """Tests for Cursor.execute_update() method."""
 

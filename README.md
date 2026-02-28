@@ -89,13 +89,11 @@ with gizmosql.connect("grpc+tls://localhost:31337",
         print(table)
 ```
 
-### DDL/DML — execute immediately without fetching
+### DDL/DML — auto-detected and executed immediately
 
-GizmoSQL uses a lazy-execution model, so a plain `cursor.execute()` for DDL/DML
-requires a subsequent fetch to actually fire the statement on the server.
-`cursor.execute_update()` bypasses this by calling the server's
-`DoPutPreparedStatementUpdate` RPC directly, executing the statement immediately
-and returning the number of rows affected:
+`cursor.execute()` automatically detects DDL/DML statements and executes them
+immediately on the server, matching the behavior of the GizmoSQL JDBC and ODBC
+drivers. No special API is needed — just use `execute()` for everything:
 
 ```python
 from adbc_driver_gizmosql import dbapi as gizmosql
@@ -106,13 +104,20 @@ with gizmosql.connect("grpc+tls://localhost:31337",
                       tls_skip_verify=True,
                       ) as conn:
     with conn.cursor() as cur:
-        # DDL — returns 0 (no rows affected)
-        cur.execute_update("CREATE TABLE t (a INT)")
+        # DDL and DML work with regular execute()
+        cur.execute("CREATE TABLE t (a INT)")
+        cur.execute("INSERT INTO t VALUES (1)")
 
-        # DML — returns the number of rows affected
-        rows_affected = cur.execute_update("INSERT INTO t VALUES (1)")
-        print(f"Rows affected: {rows_affected}")
+        # SELECT works as usual
+        cur.execute("SELECT * FROM t")
+        print(cur.fetch_arrow_table())
+
+        # Cleanup
+        cur.execute("DROP TABLE t")
 ```
+
+> **Note:** `cursor.execute_update(query)` is still available if you need the
+> rows-affected count returned directly: `rows = cur.execute_update("INSERT ...")`.
 
 ### OAuth/SSO authentication
 
@@ -221,7 +226,7 @@ with gizmosql.connect("grpc+tls://localhost:31337",
 
 ### `cursor.execute_update()`
 
-Execute a DDL/DML statement immediately without fetching. Use this instead of `cursor.execute()` for statements that don't return result sets — it fires the statement on the server right away, bypassing GizmoSQL's lazy-execution model.
+Execute a DDL/DML statement immediately and return the rows-affected count. This is an alternative to `cursor.execute()` when you need the rows-affected count as the return value.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
@@ -229,7 +234,7 @@ Execute a DDL/DML statement immediately without fetching. Use this instead of `c
 
 Returns: `int` — number of rows affected (`0` for DDL statements that do not affect rows)
 
-> **Note:** The module-level `gizmosql.execute_update(cursor, query)` function is still available for backward compatibility but new code should use `cursor.execute_update(query)`.
+> **Note:** `cursor.execute()` now auto-detects DDL/DML and executes it immediately, so `execute_update()` is only needed when you want the rows-affected count returned directly. The module-level `gizmosql.execute_update(cursor, query)` function is still available for backward compatibility.
 
 ### `get_oauth_token()`
 

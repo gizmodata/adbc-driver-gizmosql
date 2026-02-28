@@ -18,7 +18,7 @@ Example (password auth)::
             cur.execute("SELECT 1")
             print(cur.fetch_arrow_table())
 
-Example (DDL/DML — executes immediately without fetching)::
+Example (DDL/DML — auto-detected and executed immediately)::
 
     from adbc_driver_gizmosql import dbapi as gizmosql
 
@@ -26,9 +26,10 @@ Example (DDL/DML — executes immediately without fetching)::
                           username="user", password="pass",
                           tls_skip_verify=True) as conn:
         with conn.cursor() as cur:
-            cur.execute_update("CREATE TABLE t (a INT)")
-            rows_affected = cur.execute_update("INSERT INTO t VALUES (1)")
-            print(f"Rows affected: {rows_affected}")
+            cur.execute("CREATE TABLE t (a INT)")
+            cur.execute("INSERT INTO t VALUES (1)")
+            cur.execute("SELECT * FROM t")
+            print(cur.fetch_arrow_table())
 
 Example (OAuth/SSO)::
 
@@ -71,9 +72,93 @@ from adbc_driver_flightsql.dbapi import (  # noqa: F401
 
 from ._oauth import DEFAULT_OAUTH_PORT, get_oauth_token
 
+# SQL keywords that indicate DDL/DML statements (not SELECT/WITH/SHOW/etc.).
+# When execute() sees one of these as the first keyword, it routes through
+# execute_update() (DoPut RPC) for immediate server-side execution.
+_DDL_DML_KEYWORDS = frozenset({
+    "ALTER",
+    "ATTACH",
+    "BEGIN",
+    "CALL",
+    "CHECKPOINT",
+    "COMMENT",
+    "COMMIT",
+    "COPY",
+    "CREATE",
+    "DELETE",
+    "DETACH",
+    "DROP",
+    "EXPORT",
+    "GRANT",
+    "IMPORT",
+    "INSERT",
+    "INSTALL",
+    "LOAD",
+    "MERGE",
+    "REVOKE",
+    "ROLLBACK",
+    "SET",
+    "TRUNCATE",
+    "UPDATE",
+    "USE",
+    "VACUUM",
+})
+
+
+def _is_ddl_dml(operation) -> bool:
+    """Return True if the SQL statement is DDL/DML based on the first keyword."""
+    if not isinstance(operation, str):
+        return False
+    stripped = operation.lstrip()
+    if not stripped:
+        return False
+    # Extract the first word (token before whitespace or opening paren)
+    first_word = stripped.split(None, 1)[0].rstrip("(;")
+    return first_word.upper() in _DDL_DML_KEYWORDS
+
 
 class Cursor(_BaseCursor):
-    """GizmoSQL cursor with ``execute_update()`` support."""
+    """GizmoSQL cursor with automatic DDL/DML detection.
+
+    ``execute()`` auto-detects DDL/DML statements and routes them through
+    ``execute_update()`` for immediate server-side execution, matching the
+    behavior of the GizmoSQL JDBC and ODBC drivers.
+
+    ``execute_update()`` is still available for explicit DDL/DML execution.
+    """
+
+    def execute(self, operation, parameters=None):
+        """Execute a query, auto-detecting DDL/DML for immediate execution.
+
+        GizmoSQL uses lazy execution — ``GetFlightInfo`` only plans queries,
+        and actual execution is deferred to ``DoGet`` (fetch).  For DDL/DML
+        the statement would never execute unless the client fetches.
+
+        This override detects DDL/DML by SQL keyword and routes it through
+        ``execute_update()`` (the server's ``DoPut`` RPC) for immediate
+        execution, matching the JDBC/ODBC driver pattern.
+
+        For SELECT/WITH/SHOW and other read queries, the standard
+        ``execute()`` path is used (GetFlightInfo → DoGet on fetch).
+
+        Args:
+            operation: SQL query string or serialized Substrait plan (bytes).
+            parameters: Optional bind parameters (sequence, dict, or Arrow data).
+
+        Returns:
+            This cursor (to enable method chaining).
+        """
+        if _is_ddl_dml(operation) and parameters is None:
+            # DDL/DML — execute immediately via DoPut RPC.
+            self.adbc_statement.set_sql_query(operation)
+            self._rowcount = self.adbc_statement.execute_update()
+            self._results = None  # description returns None when _results is None
+            self._last_query = operation
+            return self
+
+        # SELECT/WITH/SHOW etc. — standard lazy-execution path.
+        super().execute(operation, parameters)
+        return self
 
     def execute_update(self, query: str) -> int:
         """Execute a DDL/DML statement immediately and return the rows affected.

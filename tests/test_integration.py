@@ -73,8 +73,60 @@ class TestPasswordAuth:
             assert table.num_rows == 5
 
 
+class TestExecuteAutoDetect:
+    """Test cursor.execute() auto-detecting DDL/DML for immediate execution."""
+
+    def test_create_insert_query_drop(self, conn):
+        """execute() handles the full DDL/DML/SELECT lifecycle."""
+        with conn.cursor() as cur:
+            cur.execute("CREATE TABLE test_auto_detect (id INT, name VARCHAR)")
+
+        try:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO test_auto_detect VALUES (1, 'alice')")
+                cur.execute("INSERT INTO test_auto_detect VALUES (2, 'bob')")
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id, name FROM test_auto_detect ORDER BY id"
+                )
+                table = cur.fetch_arrow_table()
+                assert table.num_rows == 2
+                assert table.column("id")[0].as_py() == 1
+                assert table.column("name")[1].as_py() == "bob"
+        finally:
+            with conn.cursor() as cur:
+                cur.execute("DROP TABLE test_auto_detect")
+
+    def test_description_none_after_ddl(self, conn):
+        """execute() returns None description for DDL (DBAPI 2.0 spec)."""
+        with conn.cursor() as cur:
+            cur.execute("CREATE TABLE test_desc_ddl (id INT)")
+        try:
+            with conn.cursor() as cur:
+                cur.execute("DROP TABLE test_desc_ddl")
+                assert cur.description is None
+        except Exception:
+            with conn.cursor() as cur:
+                cur.execute_update("DROP TABLE IF EXISTS test_desc_ddl")
+            raise
+
+    def test_description_present_after_select(self, conn):
+        """execute() returns column descriptions for SELECT."""
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 AS a, 'hello' AS b")
+            assert cur.description is not None
+            assert len(cur.description) == 2
+
+    def test_chaining(self, conn):
+        """execute() returns self for method chaining."""
+        with conn.cursor() as cur:
+            result = cur.execute("SELECT 1")
+            assert result is cur
+
+
 class TestExecuteUpdate:
-    """Test cursor.execute_update() for DDL/DML that fires immediately."""
+    """Test cursor.execute_update() for explicit DDL/DML with rows-affected count."""
 
     def test_create_insert_query_drop(self, conn):
         with conn.cursor() as cur:
