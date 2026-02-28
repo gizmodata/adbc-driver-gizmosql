@@ -14,7 +14,7 @@ A Python [ADBC](https://arrow.apache.org/adbc/) driver for [GizmoSQL](https://gi
 
 - **OAuth/SSO browser flow** — Authenticate via your identity provider (Google, Okta, etc.) with a single parameter change
 - **DBAPI 2.0 interface** — Drop-in replacement for `adbc_driver_flightsql.dbapi`
-- **Zero extra dependencies** — OAuth flow uses only Python stdlib; the only dependency is `adbc-driver-flightsql`
+- **Minimal dependencies** — Only requires `adbc-driver-flightsql` and `pyarrow`; the OAuth flow uses only Python stdlib
 
 ## Setup (to run locally)
 
