@@ -45,7 +45,8 @@ Example (OAuth/SSO)::
 
 from __future__ import annotations
 
-from typing import Any, Optional
+import threading
+from typing import Any, Dict, Optional, Union
 
 import adbc_driver_flightsql
 import adbc_driver_manager
@@ -208,6 +209,22 @@ class Cursor(_BaseCursor):
 
 class Connection(_BaseConnection):
     """GizmoSQL connection that returns :class:`Cursor` instances."""
+
+    # Cache and lock for adbc_get_info(). The Go ADBC Flight SQL driver has an
+    # upstream bug (apache/arrow-adbc#1178) where concurrent adbc_get_info()
+    # calls crash with "fatal error: concurrent map writes" due to an
+    # unprotected map in DriverInfo. We call the underlying method exactly once
+    # and cache the result.
+    _get_info_lock = threading.Lock()
+    _get_info_cache: Optional[Dict[Union[str, int], Any]] = None
+
+    def adbc_get_info(self) -> Dict[Union[str, int], Any]:
+        """Get metadata about the database and driver (thread-safe, cached)."""
+        if self._get_info_cache is None:
+            with self._get_info_lock:
+                if self._get_info_cache is None:
+                    Connection._get_info_cache = super().adbc_get_info()
+        return self._get_info_cache
 
     def cursor(
         self,
