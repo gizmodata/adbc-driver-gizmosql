@@ -105,11 +105,28 @@ _DDL_DML_KEYWORDS = frozenset({
 })
 
 
+import re as _re
+
+_BLOCK_COMMENT_RE = _re.compile(r"/\*.*?\*/", _re.DOTALL)
+_LINE_COMMENT_RE = _re.compile(r"--[^\n]*")
+
+
+def _strip_sql_comments(sql: str) -> str:
+    """Strip SQL block (/* ... */) and line (-- ...) comments."""
+    sql = _BLOCK_COMMENT_RE.sub("", sql)
+    sql = _LINE_COMMENT_RE.sub("", sql)
+    return sql.lstrip()
+
+
 def _is_ddl_dml(operation) -> bool:
-    """Return True if the SQL statement is DDL/DML based on the first keyword."""
+    """Return True if the SQL statement is DDL/DML based on the first keyword.
+
+    Strips SQL comments first so that query-comment prefixes (e.g., dbt's
+    ``/* {"app": "dbt", ...} */``) don't mask the actual statement keyword.
+    """
     if not isinstance(operation, str):
         return False
-    stripped = operation.lstrip()
+    stripped = _strip_sql_comments(operation)
     if not stripped:
         return False
     # Extract the first word (token before whitespace or opening paren)

@@ -328,6 +328,48 @@ class TestIsDdlDml:
 
         assert _is_ddl_dml("COPY t FROM '/tmp/data.csv'") is True
 
+    def test_block_comment_before_create(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml('/* {"app": "dbt"} */\nCREATE TABLE t (a INT)') is True
+
+    def test_block_comment_before_alter(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("/* comment */ ALTER TABLE t ADD COLUMN b INT") is True
+
+    def test_block_comment_before_select(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("/* comment */ SELECT 1") is False
+
+    def test_line_comment_before_insert(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("-- some comment\nINSERT INTO t VALUES (1)") is True
+
+    def test_multiple_block_comments(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("/* a */ /* b */ DROP TABLE t") is True
+
+    def test_only_comment(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        assert _is_ddl_dml("/* just a comment */") is False
+
+    def test_dbt_query_comment_multiline(self):
+        from adbc_driver_gizmosql.dbapi import _is_ddl_dml
+
+        sql = (
+            '/* {"app": "dbt", "dbt_version": "1.11.7", '
+            '"profile_name": "test", "target_name": "dev"} */\n'
+            'create view "memory"."main"."my_model" as (\n'
+            "  select 1\n"
+            ");"
+        )
+        assert _is_ddl_dml(sql) is True
+
 
 class TestCursorExecute:
     """Tests for Cursor.execute() auto-detection of DDL/DML."""
