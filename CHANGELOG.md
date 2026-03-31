@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-03-31
+
+### Fixed
+- `_is_ddl_dml()` now strips SQL block (`/* ... */`) and line (`-- ...`) comments before keyword detection. dbt's query comment prefix was preventing DDL/DML auto-detection, causing statements to go through the Flight SQL `PREPARE` path instead of `execute_update()`, which led to sporadic catalog errors on remote GizmoSQL instances.
+
 ## [1.1.0] - 2026-02-28
 
 ### Changed
