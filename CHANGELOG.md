@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.5] - 2026-03-31
+
+### Fixed
+- `adbc_get_info()` is now thread-safe. Concurrent calls to `adbc_get_info()` on the Go ADBC Flight SQL driver crash with `"fatal error: concurrent map writes"` (apache/arrow-adbc#1178). The result is now cached behind a lock so the underlying call happens exactly once.
+
 ## [1.1.4] - 2026-03-31
 
 ### Fixed
