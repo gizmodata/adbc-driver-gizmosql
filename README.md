@@ -6,7 +6,7 @@ A Python [ADBC](https://arrow.apache.org/adbc/) driver for [GizmoSQL](https://gi
 [![adbc-driver-gizmosql-ci](https://github.com/gizmodata/adbc-driver-gizmosql/actions/workflows/ci.yml/badge.svg)](https://github.com/gizmodata/adbc-driver-gizmosql/actions/workflows/ci.yml)
 [![Supported Python Versions](https://img.shields.io/pypi/pyversions/adbc-driver-gizmosql)](https://pypi.org/project/adbc-driver-gizmosql/)
 [![PyPI version](https://badge.fury.io/py/adbc-driver-gizmosql.svg)](https://badge.fury.io/py/adbc-driver-gizmosql)
-[![PyPI Downloads](https://img.shields.io/pypi/dm/adbc-driver-gizmosql.svg)](https://pypi.org/project/adbc-driver-gizmosql/)
+[![PyPI Downloads](https://img.shields.io/pepy/dt/adbc-driver-gizmosql.svg)](https://pypi.org/project/adbc-driver-gizmosql/)
 
 ## Overview
 
