@@ -384,7 +384,9 @@ class TestCursorExecute:
 
         result = Cursor.execute(cursor, "CREATE TABLE t (a INT)")
 
-        cursor.adbc_statement.set_sql_query.assert_called_once_with("CREATE TABLE t (a INT)")
+        cursor.adbc_statement.set_sql_query.assert_called_once_with(
+            query="CREATE TABLE t (a INT)"
+        )
         cursor.adbc_statement.execute_update.assert_called_once()
         assert cursor._results is None
         assert result is cursor
@@ -399,7 +401,9 @@ class TestCursorExecute:
 
         result = Cursor.execute(cursor, "INSERT INTO t VALUES (1)")
 
-        cursor.adbc_statement.set_sql_query.assert_called_once_with("INSERT INTO t VALUES (1)")
+        cursor.adbc_statement.set_sql_query.assert_called_once_with(
+            query="INSERT INTO t VALUES (1)"
+        )
         cursor.adbc_statement.execute_update.assert_called_once()
         assert cursor._rowcount == 1
         assert result is cursor
@@ -414,7 +418,7 @@ class TestCursorExecute:
 
         result = Cursor.execute(cursor, "SELECT 1")
 
-        mock_super_execute.assert_called_once_with("SELECT 1", None)
+        mock_super_execute.assert_called_once_with(operation="SELECT 1", parameters=None)
         cursor.adbc_statement.execute_update.assert_not_called()
         assert result is cursor
 
@@ -428,7 +432,9 @@ class TestCursorExecute:
 
         result = Cursor.execute(cursor, "INSERT INTO t VALUES (?)", parameters=[1])
 
-        mock_super_execute.assert_called_once_with("INSERT INTO t VALUES (?)", [1])
+        mock_super_execute.assert_called_once_with(
+            operation="INSERT INTO t VALUES (?)", parameters=[1]
+        )
         cursor.adbc_statement.execute_update.assert_not_called()
         assert result is cursor
 
