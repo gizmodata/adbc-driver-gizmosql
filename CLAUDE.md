@@ -51,4 +51,13 @@ Integration tests (`tests/test_integration.py`) are very important. Any new or m
 ## Version Management
 - Version is in `pyproject.toml` and `src/adbc_driver_gizmosql/_version.py`
 - Use `bumpver update --patch` (or `--minor`/`--major`) to bump — it auto-commits and tags
+- **Tags must always be `v`-prefixed** (e.g. `v1.1.6`, not `1.1.6`). bumpver tags as `{version}` with no prefix and offers no template for the tag name (see `bumpver/vcs.py` line ~242), so after every `bumpver update` you must retag:
+  ```bash
+  bumpver update --patch              # creates commit + tag '1.1.6'
+  git tag -d 1.1.6                    # delete unprefixed tag
+  git tag -a v1.1.6 -m "v1.1.6" HEAD  # recreate with v prefix
+  git push origin main v1.1.6         # push commit + prefixed tag
+  ```
+  Older tags (1.1.1 / 1.1.2 / 1.1.3) lack the prefix; the project standardized on `v`-prefixed tags from v1.1.4 onward. CI's tag pattern (`*.*.*`) matches both, so PyPI publish still fires either way — but stay consistent with the prefix.
+- Before bumping: move the `[Unreleased]` CHANGELOG section to a dated `[X.Y.Z]` section (separate commit) so the release commit is purely the version bump.
 - GitHub Actions publishes to PyPI on release (OIDC trusted publishing)
