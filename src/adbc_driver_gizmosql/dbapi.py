@@ -108,8 +108,16 @@ _DDL_DML_KEYWORDS = frozenset({
 
 import re as _re
 
-_BLOCK_COMMENT_RE = _re.compile(r"/\*.*?\*/", _re.DOTALL)
-_LINE_COMMENT_RE = _re.compile(r"--[^\n]*")
+_BLOCK_COMMENT_RE = _re.compile(pattern=r"/\*.*?\*/", flags=_re.DOTALL)
+_LINE_COMMENT_RE = _re.compile(pattern=r"--[^\n]*")
+# Strip single- and double-quoted string literals. SQL doubles the quote
+# character to escape it (''), so the regex consumes any number of either
+# (chars-other-than-quote) or (doubled-quote) before the closing quote.
+_SINGLE_QUOTED_RE = _re.compile(pattern=r"'(?:[^']|'')*'")
+_DOUBLE_QUOTED_RE = _re.compile(pattern=r'"(?:[^"]|"")*"')
+# Word-boundary RETURNING — DML statements with a RETURNING clause produce a
+# result set and must NOT be routed through the DoPut/execute_update path.
+_RETURNING_RE = _re.compile(pattern=r"\bRETURNING\b", flags=_re.IGNORECASE)
 
 
 def _strip_sql_comments(sql: str) -> str:
@@ -119,11 +127,101 @@ def _strip_sql_comments(sql: str) -> str:
     return sql.lstrip()
 
 
+def _has_returning_clause(sql: str) -> bool:
+    """Return True if the SQL contains a ``RETURNING`` keyword outside of
+    string literals. Comments must already be stripped by the caller.
+
+    DuckDB's ``INSERT ... RETURNING`` / ``UPDATE ... RETURNING`` /
+    ``DELETE ... RETURNING`` produce a result set, so the cursor must take
+    the lazy GetFlightInfo→DoGet path rather than DoPut/execute_update
+    (which only returns a row count and discards the rows).
+    """
+    # Remove string literals so the word "RETURNING" inside a string value
+    # (e.g. INSERT INTO t VALUES ('returning')) does not trigger a match.
+    without_strings = _SINGLE_QUOTED_RE.sub(repl="''", string=sql)
+    without_strings = _DOUBLE_QUOTED_RE.sub(repl='""', string=without_strings)
+    return _RETURNING_RE.search(string=without_strings) is not None
+
+
+class _CachedRowIterator:
+    """Stand-in for ``adbc_driver_manager.dbapi._RowIterator`` that serves an
+    already-materialized ``pyarrow.Table``.
+
+    Used after eager-materializing ``INSERT/UPDATE/DELETE ... RETURNING`` so
+    the underlying DML actually fires regardless of whether the caller chooses
+    to fetch — see ``Cursor.execute()`` for the rationale.
+
+    Implements just the surface area that ``Cursor`` reaches into on
+    ``self._results`` (description, rownumber, fetchone/fetchmany/fetchall,
+    fetch_arrow_table/fetch_df/fetch_polars, close).
+    """
+
+    def __init__(self, table) -> None:
+        self._table = table
+        self._row_idx = 0
+        self.rownumber = 0
+
+    @property
+    def description(self):
+        if self._table is None:
+            return []
+        return [
+            (field.name, field.type, None, None, None, None, None)
+            for field in self._table.schema
+        ]
+
+    def fetchone(self):
+        if self._table is None or self._row_idx >= self._table.num_rows:
+            return None
+        row = tuple(c[self._row_idx].as_py() for c in self._table.columns)
+        self._row_idx += 1
+        self.rownumber += 1
+        return row
+
+    def fetchmany(self, size: int):
+        rows = []
+        for _ in range(size):
+            r = self.fetchone()
+            if r is None:
+                break
+            rows.append(r)
+        return rows
+
+    def fetchall(self):
+        rows = []
+        while True:
+            r = self.fetchone()
+            if r is None:
+                break
+            rows.append(r)
+        return rows
+
+    def fetch_arrow_table(self):
+        return self._table
+
+    def fetch_df(self):
+        return self._table.to_pandas()
+
+    def fetch_polars(self):
+        import polars
+
+        return polars.from_arrow(self._table)
+
+    def close(self) -> None:
+        self._table = None
+
+
 def _is_ddl_dml(operation) -> bool:
     """Return True if the SQL statement is DDL/DML based on the first keyword.
 
     Strips SQL comments first so that query-comment prefixes (e.g., dbt's
     ``/* {"app": "dbt", ...} */``) don't mask the actual statement keyword.
+
+    INSERT/UPDATE/DELETE statements with a ``RETURNING`` clause are *not*
+    classified as pure DDL/DML here: they produce a result set and must
+    take the regular query path so the caller can ``fetch_arrow_table()``
+    the returned rows. Without this carve-out the ``RETURNING`` rows would
+    be silently discarded by the DoPut/execute_update code path.
     """
     if not isinstance(operation, str):
         return False
@@ -131,8 +229,12 @@ def _is_ddl_dml(operation) -> bool:
     if not stripped:
         return False
     # Extract the first word (token before whitespace or opening paren)
-    first_word = stripped.split(None, 1)[0].rstrip("(;")
-    return first_word.upper() in _DDL_DML_KEYWORDS
+    first_word = stripped.split(maxsplit=1)[0].rstrip("(;")
+    if first_word.upper() not in _DDL_DML_KEYWORDS:
+        return False
+    if _has_returning_clause(stripped):
+        return False
+    return True
 
 
 class Cursor(_BaseCursor):
@@ -156,8 +258,18 @@ class Cursor(_BaseCursor):
         ``execute_update()`` (the server's ``DoPut`` RPC) for immediate
         execution, matching the JDBC/ODBC driver pattern.
 
+        ``INSERT/UPDATE/DELETE ... RETURNING`` statements take the regular
+        ``GetFlightInfo`` → ``DoGet`` query path (since they produce a
+        result set the ``DoPut`` rowcount-only path cannot carry), but the
+        result is **eagerly materialized** here to ensure the underlying
+        DML actually fires regardless of whether the caller fetches —
+        otherwise GizmoSQL's lazy planning would no-op the statement.
+        ``cursor.fetch_arrow_table()`` (and the other fetch APIs) then
+        return the cached rows.
+
         For SELECT/WITH/SHOW and other read queries, the standard
-        ``execute()`` path is used (GetFlightInfo → DoGet on fetch).
+        ``execute()`` path is used (GetFlightInfo → DoGet on fetch) without
+        eager materialization — large result sets stream as usual.
 
         Args:
             operation: SQL query string or serialized Substrait plan (bytes).
@@ -166,16 +278,35 @@ class Cursor(_BaseCursor):
         Returns:
             This cursor (to enable method chaining).
         """
-        if _is_ddl_dml(operation) and parameters is None:
+        if _is_ddl_dml(operation=operation) and parameters is None:
             # DDL/DML — execute immediately via DoPut RPC.
-            self.adbc_statement.set_sql_query(operation)
+            self.adbc_statement.set_sql_query(query=operation)
             self._rowcount = self.adbc_statement.execute_update()
             self._results = None  # description returns None when _results is None
             self._last_query = operation
             return self
 
-        # SELECT/WITH/SHOW etc. — standard lazy-execution path.
-        super().execute(operation, parameters)
+        # SELECT/WITH/SHOW and INSERT/UPDATE/DELETE...RETURNING.
+        super().execute(operation=operation, parameters=parameters)
+
+        # For DML with a RETURNING clause, eagerly materialize the result so
+        # the underlying statement actually executes. Without this, the user
+        # could call cursor.execute("INSERT ... RETURNING ...") and never
+        # fetch — and GizmoSQL's lazy GetFlightInfo would mean the row never
+        # lands in the table. We then swap _results for an in-memory iterator
+        # so subsequent fetch_arrow_table()/fetchall()/etc. still work.
+        if isinstance(operation, str) and _has_returning_clause(
+            sql=_strip_sql_comments(sql=operation)
+        ):
+            try:
+                cached = super().fetch_arrow_table()
+            finally:
+                # The underlying _RowIterator is now consumed; close it to
+                # release any driver-side resources.
+                if self._results is not None:
+                    self._results.close()
+            self._results = _CachedRowIterator(table=cached)
+            self._rowcount = cached.num_rows
         return self
 
     def execute_update(self, query: str) -> int:
