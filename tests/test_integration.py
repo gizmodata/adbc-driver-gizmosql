@@ -334,6 +334,82 @@ class TestBulkIngest:
                 cur.execute_update("DROP TABLE test_ingest_rb")
 
 
+class TestReturningClause:
+    """End-to-end tests for INSERT/UPDATE/DELETE ... RETURNING.
+
+    Regression for issue #163: ``INSERT ... RETURNING`` was being routed
+    through ``execute_update()`` (DoPut), which only returns a row count
+    and discards the ``RETURNING`` rows. The cursor must instead take the
+    regular query path so ``fetch_arrow_table()`` exposes the returned
+    rows.
+    """
+
+    def test_insert_returning_yields_rows(self, conn):
+        with conn.cursor() as cur:
+            cur.execute_update(
+                "CREATE SEQUENCE test_returning_seq; "
+                "CREATE TABLE test_returning ("
+                "    id INTEGER DEFAULT nextval('test_returning_seq') PRIMARY KEY,"
+                "    name VARCHAR"
+                ")"
+            )
+
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO test_returning (name) VALUES "
+                    "('alice'), ('bob') RETURNING id, name"
+                )
+                # Description must reflect a real result set (was None before fix).
+                assert cur.description is not None
+                table = cur.fetch_arrow_table()
+                assert table.num_rows == 2
+                assert set(table.column("name").to_pylist()) == {"alice", "bob"}
+                # IDs are sequence-generated; just verify both are non-null.
+                ids = table.column("id").to_pylist()
+                assert all(isinstance(i, int) for i in ids)
+                assert len(set(ids)) == 2
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE test_returning SET name = 'CAROL' "
+                    "WHERE name = 'alice' RETURNING id, name"
+                )
+                table = cur.fetch_arrow_table()
+                assert table.num_rows == 1
+                assert table.column("name")[0].as_py() == "CAROL"
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM test_returning WHERE name = 'bob' "
+                    "RETURNING id"
+                )
+                table = cur.fetch_arrow_table()
+                assert table.num_rows == 1
+        finally:
+            with conn.cursor() as cur:
+                cur.execute_update(
+                    "DROP TABLE test_returning; "
+                    "DROP SEQUENCE test_returning_seq"
+                )
+
+    def test_insert_without_returning_still_uses_doput(self, conn):
+        # Sanity check: a plain INSERT (no RETURNING) must still take the
+        # execute_update path — i.e. cursor.description stays None and the
+        # rowcount comes back populated. This guards against the carve-out
+        # accidentally widening to all DML.
+        with conn.cursor() as cur:
+            cur.execute_update("CREATE TABLE test_no_returning (id INT)")
+        try:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO test_no_returning VALUES (1), (2)")
+                assert cur.description is None
+                assert cur.rowcount == 2
+        finally:
+            with conn.cursor() as cur:
+                cur.execute_update("DROP TABLE test_no_returning")
+
+
 class TestConnectionContextManager:
     """Test that the connection works properly as a context manager."""
 

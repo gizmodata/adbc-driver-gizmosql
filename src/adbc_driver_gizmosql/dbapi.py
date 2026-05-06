@@ -108,8 +108,16 @@ _DDL_DML_KEYWORDS = frozenset({
 
 import re as _re
 
-_BLOCK_COMMENT_RE = _re.compile(r"/\*.*?\*/", _re.DOTALL)
-_LINE_COMMENT_RE = _re.compile(r"--[^\n]*")
+_BLOCK_COMMENT_RE = _re.compile(pattern=r"/\*.*?\*/", flags=_re.DOTALL)
+_LINE_COMMENT_RE = _re.compile(pattern=r"--[^\n]*")
+# Strip single- and double-quoted string literals. SQL doubles the quote
+# character to escape it (''), so the regex consumes any number of either
+# (chars-other-than-quote) or (doubled-quote) before the closing quote.
+_SINGLE_QUOTED_RE = _re.compile(pattern=r"'(?:[^']|'')*'")
+_DOUBLE_QUOTED_RE = _re.compile(pattern=r'"(?:[^"]|"")*"')
+# Word-boundary RETURNING — DML statements with a RETURNING clause produce a
+# result set and must NOT be routed through the DoPut/execute_update path.
+_RETURNING_RE = _re.compile(pattern=r"\bRETURNING\b", flags=_re.IGNORECASE)
 
 
 def _strip_sql_comments(sql: str) -> str:
@@ -119,11 +127,33 @@ def _strip_sql_comments(sql: str) -> str:
     return sql.lstrip()
 
 
+def _has_returning_clause(sql: str) -> bool:
+    """Return True if the SQL contains a ``RETURNING`` keyword outside of
+    string literals. Comments must already be stripped by the caller.
+
+    DuckDB's ``INSERT ... RETURNING`` / ``UPDATE ... RETURNING`` /
+    ``DELETE ... RETURNING`` produce a result set, so the cursor must take
+    the lazy GetFlightInfo→DoGet path rather than DoPut/execute_update
+    (which only returns a row count and discards the rows).
+    """
+    # Remove string literals so the word "RETURNING" inside a string value
+    # (e.g. INSERT INTO t VALUES ('returning')) does not trigger a match.
+    without_strings = _SINGLE_QUOTED_RE.sub(repl="''", string=sql)
+    without_strings = _DOUBLE_QUOTED_RE.sub(repl='""', string=without_strings)
+    return _RETURNING_RE.search(string=without_strings) is not None
+
+
 def _is_ddl_dml(operation) -> bool:
     """Return True if the SQL statement is DDL/DML based on the first keyword.
 
     Strips SQL comments first so that query-comment prefixes (e.g., dbt's
     ``/* {"app": "dbt", ...} */``) don't mask the actual statement keyword.
+
+    INSERT/UPDATE/DELETE statements with a ``RETURNING`` clause are *not*
+    classified as pure DDL/DML here: they produce a result set and must
+    take the regular query path so the caller can ``fetch_arrow_table()``
+    the returned rows. Without this carve-out the ``RETURNING`` rows would
+    be silently discarded by the DoPut/execute_update code path.
     """
     if not isinstance(operation, str):
         return False
@@ -131,8 +161,12 @@ def _is_ddl_dml(operation) -> bool:
     if not stripped:
         return False
     # Extract the first word (token before whitespace or opening paren)
-    first_word = stripped.split(None, 1)[0].rstrip("(;")
-    return first_word.upper() in _DDL_DML_KEYWORDS
+    first_word = stripped.split(maxsplit=1)[0].rstrip("(;")
+    if first_word.upper() not in _DDL_DML_KEYWORDS:
+        return False
+    if _has_returning_clause(stripped):
+        return False
+    return True
 
 
 class Cursor(_BaseCursor):

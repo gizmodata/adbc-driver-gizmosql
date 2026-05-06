@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- `cursor.execute()` now correctly handles `INSERT/UPDATE/DELETE ... RETURNING` ([gizmosql#163](https://github.com/gizmodata/gizmosql/issues/163)). Previously the SQL was unconditionally routed through `execute_update()` (the server's `DoPut` RPC) on the basis of the leading keyword, which only returns a row count and silently discards the rows produced by the `RETURNING` clause — so `cursor.fetch_arrow_table()` afterwards raised `Cannot fetch_arrow_table() before execute()`. DML with a `RETURNING` clause now takes the regular `GetFlightInfo` → `DoGet` query path, exposing the returned rows. `RETURNING` detection strips comments and string literals first, so values like `INSERT INTO t VALUES ('returning')` are not misclassified.
+
 ## [1.1.5] - 2026-03-31
 
 ### Fixed
