@@ -344,70 +344,185 @@ class TestReturningClause:
     rows.
     """
 
-    def test_insert_returning_yields_rows(self, conn):
+    def test_insert_returning_yields_rows_AND_persists(self, conn):
+        # Two-part check:
+        #   1. the RETURNING rows surface through fetch_arrow_table()
+        #      (was lost in the DoPut path before the fix), and
+        #   2. the INSERT/UPDATE/DELETE actually persisted to the table.
+        # Part 2 matters because GizmoSQL's GetFlightInfo only PLANS the
+        # query — actual execution happens at DoGet (fetch). Hence why
+        # plain DDL/DML still routes through execute_update(). For
+        # statements that travel through the query path we still need
+        # the caller to fetch, and this test confirms the fetch fully
+        # commits the change as DuckDB would for a normal query.
         with conn.cursor() as cur:
             cur.execute_update(
-                "CREATE SEQUENCE test_returning_seq; "
-                "CREATE TABLE test_returning ("
-                "    id INTEGER DEFAULT nextval('test_returning_seq') PRIMARY KEY,"
-                "    name VARCHAR"
-                ")"
+                query=(
+                    "CREATE SEQUENCE test_returning_seq; "
+                    "CREATE TABLE test_returning ("
+                    "    id INTEGER DEFAULT nextval('test_returning_seq') PRIMARY KEY,"
+                    "    name VARCHAR"
+                    ")"
+                )
             )
 
         try:
+            # ---- INSERT ... RETURNING ----
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO test_returning (name) VALUES "
-                    "('alice'), ('bob') RETURNING id, name"
+                    operation=(
+                        "INSERT INTO test_returning (name) VALUES "
+                        "('alice'), ('bob') RETURNING id, name"
+                    )
                 )
-                # Description must reflect a real result set (was None before fix).
+                # description must reflect a real result set (was None before fix)
                 assert cur.description is not None
-                table = cur.fetch_arrow_table()
-                assert table.num_rows == 2
-                assert set(table.column("name").to_pylist()) == {"alice", "bob"}
-                # IDs are sequence-generated; just verify both are non-null.
-                ids = table.column("id").to_pylist()
-                assert all(isinstance(i, int) for i in ids)
-                assert len(set(ids)) == 2
+                returned = cur.fetch_arrow_table()
+                assert returned.num_rows == 2
+                returned_names = set(returned.column("name").to_pylist())
+                assert returned_names == {"alice", "bob"}
+                # IDs are sequence-generated; just verify both are non-null
+                # and unique.
+                returned_ids = returned.column("id").to_pylist()
+                assert all(isinstance(i, int) for i in returned_ids)
+                assert len(set(returned_ids)) == 2
 
+            # The INSERT must have actually persisted: a fresh cursor
+            # should see the same two rows.
+            with conn.cursor() as cur:
+                cur.execute(operation="SELECT id, name FROM test_returning ORDER BY id")
+                persisted = cur.fetch_arrow_table()
+                assert persisted.num_rows == 2
+                persisted_names = set(persisted.column("name").to_pylist())
+                assert persisted_names == {"alice", "bob"}
+                # IDs returned to the client must match the IDs in the table.
+                persisted_ids = set(persisted.column("id").to_pylist())
+                assert persisted_ids == set(returned_ids)
+
+            # ---- UPDATE ... RETURNING ----
             with conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE test_returning SET name = 'CAROL' "
-                    "WHERE name = 'alice' RETURNING id, name"
+                    operation=(
+                        "UPDATE test_returning SET name = 'CAROL' "
+                        "WHERE name = 'alice' RETURNING id, name"
+                    )
                 )
-                table = cur.fetch_arrow_table()
-                assert table.num_rows == 1
-                assert table.column("name")[0].as_py() == "CAROL"
+                updated_rows = cur.fetch_arrow_table()
+                assert updated_rows.num_rows == 1
+                assert updated_rows.column("name")[0].as_py() == "CAROL"
 
+            # The UPDATE must have actually persisted.
             with conn.cursor() as cur:
                 cur.execute(
-                    "DELETE FROM test_returning WHERE name = 'bob' "
-                    "RETURNING id"
+                    operation="SELECT name FROM test_returning ORDER BY name"
                 )
-                table = cur.fetch_arrow_table()
-                assert table.num_rows == 1
+                after_update = cur.fetch_arrow_table()
+                assert after_update.column("name").to_pylist() == ["CAROL", "bob"]
+
+            # ---- DELETE ... RETURNING ----
+            with conn.cursor() as cur:
+                cur.execute(
+                    operation=(
+                        "DELETE FROM test_returning WHERE name = 'bob' "
+                        "RETURNING id"
+                    )
+                )
+                deleted_rows = cur.fetch_arrow_table()
+                assert deleted_rows.num_rows == 1
+
+            # The DELETE must have actually persisted.
+            with conn.cursor() as cur:
+                cur.execute(operation="SELECT name FROM test_returning")
+                after_delete = cur.fetch_arrow_table()
+                assert after_delete.num_rows == 1
+                assert after_delete.column("name")[0].as_py() == "CAROL"
         finally:
             with conn.cursor() as cur:
                 cur.execute_update(
-                    "DROP TABLE test_returning; "
-                    "DROP SEQUENCE test_returning_seq"
+                    query=(
+                        "DROP TABLE test_returning; "
+                        "DROP SEQUENCE test_returning_seq"
+                    )
                 )
 
-    def test_insert_without_returning_still_uses_doput(self, conn):
-        # Sanity check: a plain INSERT (no RETURNING) must still take the
-        # execute_update path — i.e. cursor.description stays None and the
-        # rowcount comes back populated. This guards against the carve-out
-        # accidentally widening to all DML.
+    def test_insert_returning_persists_even_without_fetch(self, conn):
+        # The reason the original keyword-based DDL/DML split exists is that
+        # GizmoSQL's GetFlightInfo only PLANS — actual execution waits for
+        # DoGet. An INSERT routed through the regular query path would never
+        # fire if the caller didn't fetch.
+        #
+        # The RETURNING carve-out reintroduces the query-path route, which
+        # would re-open this foot-gun unless we eagerly materialize. The
+        # cursor must guarantee the DML fires regardless of whether the
+        # caller calls fetch_arrow_table(). This test asserts that
+        # invariant: do an INSERT...RETURNING, deliberately skip the fetch,
+        # and confirm the row landed.
         with conn.cursor() as cur:
-            cur.execute_update("CREATE TABLE test_no_returning (id INT)")
+            cur.execute_update(query="CREATE TABLE test_returning_no_fetch (id INT)")
         try:
             with conn.cursor() as cur:
-                cur.execute("INSERT INTO test_no_returning VALUES (1), (2)")
-                assert cur.description is None
+                cur.execute(
+                    operation=(
+                        "INSERT INTO test_returning_no_fetch VALUES (1), (2) "
+                        "RETURNING id"
+                    )
+                )
+                # The cursor must expose the eagerly-materialized state
+                # without us having to call fetch_arrow_table().
+                assert cur.description is not None
                 assert cur.rowcount == 2
+                # And we MUST NOT call fetch_arrow_table() here — the whole
+                # point is that the INSERT must already have happened.
+
+            # New cursor: the rows must be persisted.
+            with conn.cursor() as cur:
+                cur.execute(
+                    operation="SELECT id FROM test_returning_no_fetch ORDER BY id"
+                )
+                rows = cur.fetch_arrow_table()
+                assert rows.column("id").to_pylist() == [1, 2]
+
+            # The cached result is still readable on the original cursor's
+            # successor — verify by re-issuing and fetching.
+            with conn.cursor() as cur:
+                cur.execute(
+                    operation=(
+                        "INSERT INTO test_returning_no_fetch VALUES (3) "
+                        "RETURNING id"
+                    )
+                )
+                returned = cur.fetch_arrow_table()
+                assert returned.column("id").to_pylist() == [3]
         finally:
             with conn.cursor() as cur:
-                cur.execute_update("DROP TABLE test_no_returning")
+                cur.execute_update(query="DROP TABLE test_returning_no_fetch")
+
+    def test_insert_without_returning_still_uses_doput_and_persists(self, conn):
+        # Sanity check: a plain INSERT (no RETURNING) must still take the
+        # execute_update path — cursor.description stays None and the
+        # rowcount comes back populated. This is the original reason for the
+        # DDL/DML keyword split (#1): GizmoSQL's lazy GetFlightInfo means a
+        # plain INSERT via the query path would never execute unless the
+        # caller fetched. This test guards against the RETURNING carve-out
+        # accidentally widening to all DML AND confirms the rows persist.
+        with conn.cursor() as cur:
+            cur.execute_update(query="CREATE TABLE test_no_returning (id INT)")
+        try:
+            with conn.cursor() as cur:
+                cur.execute(operation="INSERT INTO test_no_returning VALUES (1), (2)")
+                assert cur.description is None
+                assert cur.rowcount == 2
+
+            # And the rows must actually be in the table.
+            with conn.cursor() as cur:
+                cur.execute(
+                    operation="SELECT id FROM test_no_returning ORDER BY id"
+                )
+                rows = cur.fetch_arrow_table()
+                assert rows.column("id").to_pylist() == [1, 2]
+        finally:
+            with conn.cursor() as cur:
+                cur.execute_update(query="DROP TABLE test_no_returning")
 
 
 class TestConnectionContextManager:
