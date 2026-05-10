@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.7] - 2026-05-10
+
+### Changed
+- Switched the integration-test fixture from Docker
+  (`gizmodata/gizmosql:latest`) to the
+  [`gizmosql`](https://pypi.org/project/gizmosql/) PyPI package's
+  managed subprocess. The fixture mints a session-scoped self-signed
+  TLS cert via `cryptography` and passes it through `--tls`, preserving
+  the `grpc+tls://` connection contract used by the integration tests.
+  Replaced `docker` with `gizmosql>=1.26.0,<2` and `cryptography>=42`
+  in the `[test]` extra. Local development no longer requires Docker.
+
 ## [1.1.6] - 2026-05-06
 
 ### Fixed
