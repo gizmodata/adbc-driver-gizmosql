@@ -13,6 +13,7 @@ from adbc_driver_gizmosql._oauth import OAuthResult
 #   2. adbc_driver_manager.AdbcConnection  → wraps it in a connection
 #   3. Connection  → our DBAPI wrapper
 _PATCH_DB = "adbc_driver_gizmosql.dbapi.adbc_driver_flightsql.connect"
+_PATCH_RAW_DB = "adbc_driver_gizmosql.dbapi.adbc_driver_manager.AdbcDatabase"
 _PATCH_CONN = "adbc_driver_gizmosql.dbapi.adbc_driver_manager.AdbcConnection"
 _PATCH_CLS = "adbc_driver_gizmosql.dbapi.Connection"
 
@@ -202,6 +203,134 @@ class TestConnect:
             mock_adbc_conn.return_value,
             autocommit=True,
         )
+
+
+class TestConnectProfile:
+    """Tests for ADBC connection profile support in dbapi.connect()."""
+
+    def test_no_uri_and_no_profile_raises(self):
+        from adbc_driver_gizmosql.dbapi import connect
+
+        with pytest.raises(ValueError, match="'uri' or 'profile'"):
+            connect()
+
+    @patch(_PATCH_CLS)
+    @patch(_PATCH_CONN)
+    @patch(_PATCH_RAW_DB)
+    def test_profile_only(self, mock_raw_db, mock_adbc_conn, mock_conn_cls):
+        """Profile-only connect() builds the database via AdbcDatabase with
+        the bundled Flight SQL driver and the profile option."""
+        import adbc_driver_flightsql
+
+        from adbc_driver_gizmosql.dbapi import connect
+
+        mock_conn_cls.return_value = MagicMock()
+
+        result = connect(profile="gizmosql_dev")
+
+        assert result == mock_conn_cls.return_value
+        mock_raw_db.assert_called_once()
+        kwargs = mock_raw_db.call_args[1]
+        assert kwargs["profile"] == "gizmosql_dev"
+        assert kwargs["driver"] == adbc_driver_flightsql._driver_path()
+        assert "uri" not in kwargs
+
+    @patch(_PATCH_CLS)
+    @patch(_PATCH_CONN)
+    @patch(_PATCH_RAW_DB)
+    def test_profile_only_explicit_credentials_override(
+        self, mock_raw_db, mock_adbc_conn, mock_conn_cls
+    ):
+        """Credentials passed in Python are set as explicit options, which the
+        driver manager gives precedence over the profile's [Options]."""
+        from adbc_driver_gizmosql.dbapi import connect
+
+        mock_conn_cls.return_value = MagicMock()
+
+        connect(profile="gizmosql_dev", username="override_user", password="override_pass")
+
+        kwargs = mock_raw_db.call_args[1]
+        assert kwargs["username"] == "override_user"
+        assert kwargs["password"] == "override_pass"
+
+    @patch(_PATCH_CLS)
+    @patch(_PATCH_CONN)
+    @patch(_PATCH_DB)
+    def test_uri_with_profile(self, mock_db_connect, mock_adbc_conn, mock_conn_cls):
+        """uri + profile passes the profile through db_kwargs on the
+        standard flightsql connect path."""
+        from adbc_driver_gizmosql.dbapi import connect
+
+        mock_conn_cls.return_value = MagicMock()
+
+        connect("grpc+tls://localhost:31337", profile="gizmosql_dev")
+
+        mock_db_connect.assert_called_once()
+        db_kwargs = mock_db_connect.call_args[1]["db_kwargs"]
+        assert db_kwargs["profile"] == "gizmosql_dev"
+
+    @patch(_PATCH_CLS)
+    @patch(_PATCH_CONN)
+    @patch(_PATCH_DB)
+    def test_profile_uri_scheme_passthrough(self, mock_db_connect, mock_adbc_conn, mock_conn_cls):
+        """A profile:// URI is passed straight through to the driver manager."""
+        from adbc_driver_gizmosql.dbapi import connect
+
+        mock_conn_cls.return_value = MagicMock()
+
+        connect("profile://gizmosql_dev")
+
+        assert mock_db_connect.call_args[0][0] == "profile://gizmosql_dev"
+
+    @patch(_PATCH_CLS)
+    @patch(_PATCH_CONN)
+    @patch(_PATCH_RAW_DB)
+    def test_profile_only_tls_skip_verify(self, mock_raw_db, mock_adbc_conn, mock_conn_cls):
+        from adbc_driver_gizmosql.dbapi import connect
+
+        mock_conn_cls.return_value = MagicMock()
+
+        connect(profile="gizmosql_dev", tls_skip_verify=True)
+
+        kwargs = mock_raw_db.call_args[1]
+        assert kwargs["adbc.flight.sql.client_option.tls_skip_verify"] == "true"
+
+    def test_external_auth_profile_only_requires_oauth_url(self):
+        from adbc_driver_gizmosql.dbapi import connect
+
+        with pytest.raises(ValueError, match="oauth_url"):
+            connect(profile="gizmosql_dev", auth_type="external")
+
+    def test_external_auth_profile_uri_requires_oauth_url(self):
+        from adbc_driver_gizmosql.dbapi import connect
+
+        with pytest.raises(ValueError, match="oauth_url"):
+            connect("profile://gizmosql_dev", auth_type="external")
+
+    @patch(_PATCH_CLS)
+    @patch(_PATCH_CONN)
+    @patch(_PATCH_RAW_DB)
+    @patch("adbc_driver_gizmosql.dbapi.get_oauth_token")
+    def test_external_auth_profile_with_oauth_url(
+        self, mock_oauth, mock_raw_db, mock_adbc_conn, mock_conn_cls
+    ):
+        """OAuth works with a profile-only connection when oauth_url is given."""
+        from adbc_driver_gizmosql.dbapi import connect
+
+        mock_oauth.return_value = OAuthResult(token="jwt", session_uuid="uuid")
+        mock_conn_cls.return_value = MagicMock()
+
+        connect(
+            profile="gizmosql_dev",
+            auth_type="external",
+            oauth_url="https://oauth.example.com:31339",
+        )
+
+        mock_oauth.assert_called_once()
+        assert mock_oauth.call_args[1]["oauth_url"] == "https://oauth.example.com:31339"
+        kwargs = mock_raw_db.call_args[1]
+        assert kwargs["username"] == "token"
+        assert kwargs["password"] == "jwt"
 
 
 class TestExecuteUpdate:

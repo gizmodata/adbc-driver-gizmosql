@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Support for [ADBC connection profiles](https://arrow.apache.org/adbc/current/format/connection_profiles.html):
+  `dbapi.connect()` gains a `profile` parameter (and `uri` is now optional when
+  a profile supplies it). Profiles are TOML files resolved by the ADBC driver
+  manager — by bare name via the standard search paths (including
+  `ADBC_PROFILE_PATH`) or by absolute path — and support
+  `{{ env_var(NAME) }}` substitution so credentials stay out of the file.
+  `connect("profile://<name>")` URIs work as well. Options passed explicitly to
+  `connect()` override the profile's `[Options]`, and the bundled Flight SQL
+  driver is supplied automatically so profiles do not need a `driver` entry.
+  Covered by new unit tests and live-server integration tests
+  (`TestConnectionProfiles`), including env-var substitution and option
+  precedence.
+
+### Changed
+- Bumped runtime dependency floors: `adbc-driver-flightsql>=1.11.0` and
+  `adbc-driver-manager>=1.11.0` (required for connection profiles),
+  `pyarrow>=24.0.0`.
+- Bumped test extras: `gizmosql>=1.32.0,<2`, `cryptography>=49`.
+- CI: bumped `actions/checkout` to v7 and `actions/setup-python` to v6
+  (Node 24 runners).
+
 ## [1.1.7] - 2026-05-10
 
 ### Changed

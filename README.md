@@ -141,6 +141,49 @@ This will:
 3. Poll for completion and retrieve the identity token
 4. Connect to GizmoSQL using the token via Basic Auth (`username="token"`)
 
+### Connection profiles
+
+This driver supports [ADBC connection profiles](https://arrow.apache.org/adbc/current/format/connection_profiles.html)
+(requires `adbc-driver-manager >= 1.11.0`) — reusable TOML files that bundle
+the server URI and options so connection code stays credential-free.
+
+Create a profile, e.g. `~/.config/adbc/profiles/gizmosql_dev.toml` on Linux,
+`~/Library/Application Support/ADBC/Profiles/gizmosql_dev.toml` on macOS, or
+any directory listed in the `ADBC_PROFILE_PATH` environment variable:
+
+```toml
+profile_version = 1
+
+[Options]
+uri = "grpc+tls://gizmosql.example.com:31337"
+username = "gizmosql_username"
+# Keep secrets out of the file — substituted from the environment at connect time
+password = "{{ env_var(GIZMOSQL_PASSWORD) }}"
+```
+
+Then connect by profile name (no `uri` needed):
+
+```python
+from adbc_driver_gizmosql import dbapi as gizmosql
+
+with gizmosql.connect(profile="gizmosql_dev") as conn:
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 AS value")
+        print(cur.fetch_arrow_table())
+```
+
+Notes:
+
+- `connect("profile://gizmosql_dev")` and `connect(profile="/abs/path/to/profile.toml")`
+  work too.
+- The profile does **not** need a `driver` entry — the Flight SQL driver bundled
+  with this package is supplied automatically.
+- Options passed explicitly to `connect()` (e.g. `username=`, `password=`,
+  `db_kwargs=`) take precedence over the profile's `[Options]`.
+- Boolean/typed driver options are plain strings in profiles, e.g.
+  `"adbc.flight.sql.client_option.tls_skip_verify" = "true"` (dotted keys must
+  be quoted in TOML).
+
 ### Advanced: Standalone OAuth token retrieval
 
 ```python
@@ -210,7 +253,8 @@ with gizmosql.connect("grpc+tls://localhost:31337",
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `uri` | `str` | *required* | Flight SQL URI (e.g., `"grpc+tls://host:31337"`) |
+| `uri` | `str` | `None` | Flight SQL URI (e.g., `"grpc+tls://host:31337"`); optional if `profile` supplies it. `"profile://<name>"` is also accepted |
+| `profile` | `str` | `None` | ADBC connection profile — a bare name resolved via the standard search paths (incl. `ADBC_PROFILE_PATH`) or an absolute path to a `.toml` file. At least one of `uri`/`profile` is required |
 | `username` | `str` | `None` | Username for password auth |
 | `password` | `str` | `None` | Password for password auth |
 | `tls_skip_verify` | `bool` | `False` | Skip TLS cert verification |

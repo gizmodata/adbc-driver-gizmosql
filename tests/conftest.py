@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-
 GIZMOSQL_USERNAME = "gizmosql_username"
 GIZMOSQL_PASSWORD = "gizmosql_password"
 

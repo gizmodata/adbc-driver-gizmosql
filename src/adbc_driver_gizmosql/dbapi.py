@@ -45,6 +45,7 @@ Example (OAuth/SSO)::
 
 from __future__ import annotations
 
+import re as _re
 import threading
 from typing import Any, Dict, Optional, Union
 
@@ -105,8 +106,6 @@ _DDL_DML_KEYWORDS = frozenset({
     "VACUUM",
 })
 
-
-import re as _re
 
 _BLOCK_COMMENT_RE = _re.compile(pattern=r"/\*.*?\*/", flags=_re.DOTALL)
 _LINE_COMMENT_RE = _re.compile(pattern=r"--[^\n]*")
@@ -369,8 +368,9 @@ class Connection(_BaseConnection):
 
 
 def connect(
-    uri: str,
+    uri: Optional[str] = None,
     *,
+    profile: Optional[str] = None,
     username: Optional[str] = None,
     password: Optional[str] = None,
     tls_skip_verify: bool = False,
@@ -386,8 +386,34 @@ def connect(
 ) -> Connection:
     """Connect to a GizmoSQL server via ADBC Flight SQL.
 
+    At least one of ``uri`` or ``profile`` must be provided. When a
+    connection profile supplies the server URI, ``uri`` may be omitted::
+
+        # ~/.config/adbc/profiles/gizmosql_dev.toml (macOS:
+        # ~/Library/Application Support/ADBC/Profiles/gizmosql_dev.toml)
+        #
+        #   profile_version = 1
+        #   [Options]
+        #   uri = "grpc+tls://localhost:31337"
+        #   username = "user"
+        #   password = "{{ env_var(GIZMOSQL_PASSWORD) }}"
+
+        with gizmosql.connect(profile="gizmosql_dev") as conn:
+            ...
+
     Args:
         uri: Flight SQL URI (e.g., ``"grpc+tls://localhost:31337"``).
+            Optional if ``profile`` supplies the URI. A ``profile://<name>``
+            URI is also accepted and is equivalent to ``profile=<name>``.
+        profile: Name of an ADBC connection profile to load (a bare name
+            resolved against the standard ADBC profile search paths —
+            including ``$ADBC_PROFILE_PATH`` — or an absolute path to a
+            ``.toml`` profile file). Options set explicitly in Python
+            (``username``, ``password``, ``db_kwargs``, ...) override the
+            profile's ``[Options]``. The profile does not need to specify a
+            ``driver``: the Flight SQL driver bundled with this package is
+            supplied automatically. See
+            https://arrow.apache.org/adbc/current/format/connection_profiles.html
         username: Username for password authentication.
         password: Password for password authentication.
         tls_skip_verify: Skip TLS certificate verification for the
@@ -411,8 +437,12 @@ def connect(
 
     Raises:
         GizmoSQLOAuthError: If the OAuth flow fails.
-        ValueError: If required parameters are missing for the chosen auth type.
+        ValueError: If required parameters are missing for the chosen auth type,
+            or if neither ``uri`` nor ``profile`` is provided.
     """
+    if uri is None and profile is None:
+        raise ValueError("Must provide at least one of 'uri' or 'profile'.")
+
     if db_kwargs is None:
         db_kwargs = {}
     else:
@@ -429,9 +459,19 @@ def connect(
     if oauth_tls_skip_verify is None:
         oauth_tls_skip_verify = tls_skip_verify
 
+    if profile is not None:
+        db_kwargs.setdefault("profile", profile)
+
     if auth_type == "external":
-        # Extract host from URI for OAuth discovery
-        host = _extract_host(uri)
+        # Extract host from URI for OAuth discovery. With a profile-only
+        # connection (or a profile:// URI) the server host isn't known
+        # client-side, so an explicit oauth_url is required.
+        if oauth_url is None and (uri is None or uri.startswith("profile://")):
+            raise ValueError(
+                "auth_type='external' with a connection profile requires either "
+                "an explicit Flight SQL 'uri' or an 'oauth_url' for OAuth discovery."
+            )
+        host = _extract_host(uri) if uri is not None else ""
         result = get_oauth_token(
             host=host,
             port=oauth_port,
@@ -454,7 +494,16 @@ def connect(
     db = None
     conn = None
     try:
-        db = adbc_driver_flightsql.connect(uri, db_kwargs=db_kwargs)
+        if uri is not None:
+            db = adbc_driver_flightsql.connect(uri, db_kwargs=db_kwargs)
+        else:
+            # Profile-only connection: the profile's [Options] supply the URI.
+            # Pass the bundled Flight SQL driver explicitly so the profile
+            # does not need a 'driver' entry (bare driver names are not
+            # resolved inside Python site-packages by the driver manager).
+            db = adbc_driver_manager.AdbcDatabase(
+                driver=adbc_driver_flightsql._driver_path(), **db_kwargs
+            )
         conn = adbc_driver_manager.AdbcConnection(db, **(conn_kwargs or {}))
         return Connection(db, conn, autocommit=autocommit)
     except Exception:

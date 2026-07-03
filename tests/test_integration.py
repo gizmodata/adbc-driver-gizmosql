@@ -87,9 +87,7 @@ class TestExecuteAutoDetect:
                 cur.execute("INSERT INTO test_auto_detect VALUES (2, 'bob')")
 
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id, name FROM test_auto_detect ORDER BY id"
-                )
+                cur.execute("SELECT id, name FROM test_auto_detect ORDER BY id")
                 table = cur.fetch_arrow_table()
                 assert table.num_rows == 2
                 assert table.column("id")[0].as_py() == 1
@@ -131,9 +129,7 @@ class TestExecuteUpdate:
     def test_create_insert_query_drop(self, conn):
         with conn.cursor() as cur:
             # DDL — CREATE TABLE
-            result = cur.execute_update(
-                "CREATE TABLE test_exec_update (id INT, name VARCHAR)"
-            )
+            result = cur.execute_update("CREATE TABLE test_exec_update (id INT, name VARCHAR)")
             assert result == 0
 
         try:
@@ -152,9 +148,7 @@ class TestExecuteUpdate:
 
             # Verify the data was actually written
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id, name FROM test_exec_update ORDER BY id"
-                )
+                cur.execute("SELECT id, name FROM test_exec_update ORDER BY id")
                 table = cur.fetch_arrow_table()
                 assert table.num_rows == 2
                 assert table.column("id")[0].as_py() == 1
@@ -175,9 +169,7 @@ class TestExecuteUpdate:
                 cur.execute_update("INSERT INTO test_eu_update VALUES (3)")
 
             with conn.cursor() as cur:
-                rows = cur.execute_update(
-                    "DELETE FROM test_eu_update WHERE val >= 2"
-                )
+                rows = cur.execute_update("DELETE FROM test_eu_update WHERE val >= 2")
                 assert rows == 2
 
             # Verify only the expected row survives
@@ -195,16 +187,12 @@ class TestExecuteUpdate:
         from adbc_driver_gizmosql import dbapi as gizmosql
 
         with conn.cursor() as cur:
-            result = gizmosql.execute_update(
-                cur, "CREATE TABLE test_eu_compat (id INT)"
-            )
+            result = gizmosql.execute_update(cur, "CREATE TABLE test_eu_compat (id INT)")
             assert isinstance(result, int)
 
         try:
             with conn.cursor() as cur:
-                rows = gizmosql.execute_update(
-                    cur, "INSERT INTO test_eu_compat VALUES (1)"
-                )
+                rows = gizmosql.execute_update(cur, "INSERT INTO test_eu_compat VALUES (1)")
                 assert rows == 1
         finally:
             with conn.cursor() as cur:
@@ -218,10 +206,12 @@ class TestBulkIngest:
         """Test mode='create' — creates a new table and inserts data."""
         import pyarrow as pa
 
-        table = pa.table({
-            "id": [1, 2, 3],
-            "name": ["alice", "bob", "charlie"],
-        })
+        table = pa.table(
+            {
+                "id": [1, 2, 3],
+                "name": ["alice", "bob", "charlie"],
+            }
+        )
 
         with conn.cursor() as cur:
             cur.adbc_ingest("test_ingest_create", table, mode="create")
@@ -242,9 +232,7 @@ class TestBulkIngest:
         import pyarrow as pa
 
         with conn.cursor() as cur:
-            cur.execute_update(
-                "CREATE TABLE test_ingest_append (id BIGINT, val DOUBLE)"
-            )
+            cur.execute_update("CREATE TABLE test_ingest_append (id BIGINT, val DOUBLE)")
 
         try:
             batch1 = pa.table({"id": [1, 2], "val": [10.0, 20.0]})
@@ -315,9 +303,7 @@ class TestBulkIngest:
         """Test ingesting a single RecordBatch (not a full Table)."""
         import pyarrow as pa
 
-        batch = pa.record_batch(
-            {"id": [10, 20], "label": ["foo", "bar"]}
-        )
+        batch = pa.record_batch({"id": [10, 20], "label": ["foo", "bar"]})
 
         with conn.cursor() as cur:
             cur.adbc_ingest("test_ingest_rb", batch, mode="create")
@@ -413,19 +399,14 @@ class TestReturningClause:
 
             # The UPDATE must have actually persisted.
             with conn.cursor() as cur:
-                cur.execute(
-                    operation="SELECT name FROM test_returning ORDER BY name"
-                )
+                cur.execute(operation="SELECT name FROM test_returning ORDER BY name")
                 after_update = cur.fetch_arrow_table()
                 assert after_update.column("name").to_pylist() == ["CAROL", "bob"]
 
             # ---- DELETE ... RETURNING ----
             with conn.cursor() as cur:
                 cur.execute(
-                    operation=(
-                        "DELETE FROM test_returning WHERE name = 'bob' "
-                        "RETURNING id"
-                    )
+                    operation=("DELETE FROM test_returning WHERE name = 'bob' RETURNING id")
                 )
                 deleted_rows = cur.fetch_arrow_table()
                 assert deleted_rows.num_rows == 1
@@ -439,10 +420,7 @@ class TestReturningClause:
         finally:
             with conn.cursor() as cur:
                 cur.execute_update(
-                    query=(
-                        "DROP TABLE test_returning; "
-                        "DROP SEQUENCE test_returning_seq"
-                    )
+                    query=("DROP TABLE test_returning; DROP SEQUENCE test_returning_seq")
                 )
 
     def test_insert_returning_persists_even_without_fetch(self, conn):
@@ -462,10 +440,7 @@ class TestReturningClause:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    operation=(
-                        "INSERT INTO test_returning_no_fetch VALUES (1), (2) "
-                        "RETURNING id"
-                    )
+                    operation=("INSERT INTO test_returning_no_fetch VALUES (1), (2) RETURNING id")
                 )
                 # The cursor must expose the eagerly-materialized state
                 # without us having to call fetch_arrow_table().
@@ -476,9 +451,7 @@ class TestReturningClause:
 
             # New cursor: the rows must be persisted.
             with conn.cursor() as cur:
-                cur.execute(
-                    operation="SELECT id FROM test_returning_no_fetch ORDER BY id"
-                )
+                cur.execute(operation="SELECT id FROM test_returning_no_fetch ORDER BY id")
                 rows = cur.fetch_arrow_table()
                 assert rows.column("id").to_pylist() == [1, 2]
 
@@ -486,10 +459,7 @@ class TestReturningClause:
             # successor — verify by re-issuing and fetching.
             with conn.cursor() as cur:
                 cur.execute(
-                    operation=(
-                        "INSERT INTO test_returning_no_fetch VALUES (3) "
-                        "RETURNING id"
-                    )
+                    operation=("INSERT INTO test_returning_no_fetch VALUES (3) RETURNING id")
                 )
                 returned = cur.fetch_arrow_table()
                 assert returned.column("id").to_pylist() == [3]
@@ -515,9 +485,7 @@ class TestReturningClause:
 
             # And the rows must actually be in the table.
             with conn.cursor() as cur:
-                cur.execute(
-                    operation="SELECT id FROM test_no_returning ORDER BY id"
-                )
+                cur.execute(operation="SELECT id FROM test_no_returning ORDER BY id")
                 rows = cur.fetch_arrow_table()
                 assert rows.column("id").to_pylist() == [1, 2]
         finally:
@@ -543,3 +511,182 @@ class TestConnectionContextManager:
                 cur.execute("SELECT 42 AS answer")
                 table = cur.fetch_arrow_table()
                 assert table.column("answer")[0].as_py() == 42
+
+
+class TestConnectionProfiles:
+    """Test ADBC connection profiles (driver manager >= 1.11.0).
+
+    Profiles are TOML files resolved by the ADBC driver manager at database
+    init time. These tests write real profile files and connect through them
+    against the live test server, covering named-profile resolution via
+    ADBC_PROFILE_PATH, absolute-path profiles, profile:// URIs, env-var
+    substitution for secrets, and application-option precedence.
+    """
+
+    @pytest.fixture()
+    def profile_dir(self, tmp_path, monkeypatch, gizmosql_uri):
+        """Write a complete GizmoSQL profile and put its directory on
+        ADBC_PROFILE_PATH so it resolves by bare name."""
+        from conftest import GIZMOSQL_PASSWORD, GIZMOSQL_USERNAME
+
+        profile = tmp_path / "gizmosql_test.toml"
+        profile.write_text(
+            "profile_version = 1\n"
+            "\n"
+            "[Options]\n"
+            f'uri = "{gizmosql_uri}"\n'
+            f'username = "{GIZMOSQL_USERNAME}"\n'
+            f'password = "{GIZMOSQL_PASSWORD}"\n'
+            '"adbc.flight.sql.client_option.tls_skip_verify" = "true"\n'
+        )
+        monkeypatch.setenv("ADBC_PROFILE_PATH", str(tmp_path))
+        return tmp_path
+
+    def test_named_profile(self, gizmosql_server, profile_dir):
+        """connect(profile=<name>) resolves the profile via ADBC_PROFILE_PATH
+        and needs no uri or credentials in Python."""
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        with gizmosql.connect(profile="gizmosql_test") as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 AS value")
+                assert cur.fetch_arrow_table().column("value")[0].as_py() == 1
+
+    def test_profile_uri_scheme(self, gizmosql_server, profile_dir):
+        """connect('profile://<name>') is equivalent to profile=<name>."""
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        with gizmosql.connect("profile://gizmosql_test") as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 2 AS value")
+                assert cur.fetch_arrow_table().column("value")[0].as_py() == 2
+
+    def test_absolute_path_profile(self, gizmosql_server, profile_dir):
+        """connect(profile=</abs/path/to.toml>) loads the file directly,
+        without any search-path configuration."""
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        profile_path = profile_dir / "gizmosql_test.toml"
+        with gizmosql.connect(profile=str(profile_path)) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 3 AS value")
+                assert cur.fetch_arrow_table().column("value")[0].as_py() == 3
+
+    def test_profile_env_var_substitution(
+        self, gizmosql_server, gizmosql_uri, tmp_path, monkeypatch
+    ):
+        """Secrets can be kept out of the profile via {{ env_var(NAME) }}."""
+        from conftest import GIZMOSQL_PASSWORD, GIZMOSQL_USERNAME
+
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        monkeypatch.setenv("GIZMOSQL_TEST_USERNAME", GIZMOSQL_USERNAME)
+        monkeypatch.setenv("GIZMOSQL_TEST_PASSWORD", GIZMOSQL_PASSWORD)
+        profile = tmp_path / "gizmosql_env.toml"
+        profile.write_text(
+            "profile_version = 1\n"
+            "\n"
+            "[Options]\n"
+            f'uri = "{gizmosql_uri}"\n'
+            'username = "{{ env_var(GIZMOSQL_TEST_USERNAME) }}"\n'
+            'password = "{{ env_var(GIZMOSQL_TEST_PASSWORD) }}"\n'
+            '"adbc.flight.sql.client_option.tls_skip_verify" = "true"\n'
+        )
+
+        with gizmosql.connect(profile=str(profile)) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 4 AS value")
+                assert cur.fetch_arrow_table().column("value")[0].as_py() == 4
+
+    def test_profile_env_var_missing_substitutes_empty(
+        self, gizmosql_server, gizmosql_uri, tmp_path, monkeypatch
+    ):
+        """A {{ env_var(NAME) }} referencing an unset variable substitutes an
+        empty string (documented driver-manager behavior), so authentication
+        must fail rather than silently succeed."""
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        monkeypatch.delenv("GIZMOSQL_TEST_UNSET_PASSWORD", raising=False)
+        profile = tmp_path / "gizmosql_unset_env.toml"
+        profile.write_text(
+            "profile_version = 1\n"
+            "\n"
+            "[Options]\n"
+            f'uri = "{gizmosql_uri}"\n'
+            'username = "gizmosql_username"\n'
+            'password = "{{ env_var(GIZMOSQL_TEST_UNSET_PASSWORD) }}"\n'
+            '"adbc.flight.sql.client_option.tls_skip_verify" = "true"\n'
+        )
+
+        with pytest.raises(Exception):
+            with gizmosql.connect(profile=str(profile)) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    cur.fetch_arrow_table()
+
+    def test_explicit_options_override_profile(
+        self, gizmosql_server, gizmosql_uri, tmp_path, monkeypatch
+    ):
+        """Options set in Python take precedence over the profile's [Options]:
+        a profile with bad credentials still connects when good credentials
+        are passed to connect()."""
+        from conftest import GIZMOSQL_PASSWORD, GIZMOSQL_USERNAME
+
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        profile = tmp_path / "gizmosql_bad_creds.toml"
+        profile.write_text(
+            "profile_version = 1\n"
+            "\n"
+            "[Options]\n"
+            f'uri = "{gizmosql_uri}"\n'
+            'username = "wrong_user"\n'
+            'password = "wrong_password"\n'
+            '"adbc.flight.sql.client_option.tls_skip_verify" = "true"\n'
+        )
+
+        with gizmosql.connect(
+            profile=str(profile),
+            username=GIZMOSQL_USERNAME,
+            password=GIZMOSQL_PASSWORD,
+        ) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 5 AS value")
+                assert cur.fetch_arrow_table().column("value")[0].as_py() == 5
+
+    def test_explicit_uri_overrides_profile_with_profile_kwarg(
+        self, gizmosql_server, gizmosql_uri, profile_dir
+    ):
+        """uri= and profile= can be combined; the explicit uri wins."""
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        with gizmosql.connect(gizmosql_uri, profile="gizmosql_test") as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 6 AS value")
+                assert cur.fetch_arrow_table().column("value")[0].as_py() == 6
+
+    def test_ddl_dml_routing_through_profile_connection(self, gizmosql_server, profile_dir):
+        """The GizmoSQL Cursor DDL/DML auto-routing works on a
+        profile-established connection."""
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        with gizmosql.connect(profile="gizmosql_test") as conn:
+            with conn.cursor() as cur:
+                cur.execute("CREATE TABLE test_profile_ddl (id INT)")
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("INSERT INTO test_profile_ddl VALUES (1), (2)")
+                    assert cur.rowcount == 2
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) AS n FROM test_profile_ddl")
+                    assert cur.fetch_arrow_table().column("n")[0].as_py() == 2
+            finally:
+                with conn.cursor() as cur:
+                    cur.execute_update("DROP TABLE test_profile_ddl")
+
+    def test_missing_profile_raises(self, gizmosql_server, profile_dir):
+        """A profile name that doesn't resolve raises a driver-manager error."""
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        with pytest.raises(Exception, match="(?i)profile"):
+            gizmosql.connect(profile="does_not_exist_profile")
