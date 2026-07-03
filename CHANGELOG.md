@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-03
+
 ### Added
 - Support for [ADBC connection profiles](https://arrow.apache.org/adbc/current/format/connection_profiles.html):
   `dbapi.connect()` gains a `profile` parameter (and `uri` is now optional when
