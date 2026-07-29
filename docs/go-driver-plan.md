@@ -64,10 +64,13 @@ Consumers:
 
 ## Key design decisions to settle
 
-- **Repo layout**: new `gizmodata/gizmosql-adbc` Go repo vs. a `go/`
-  subtree here. Recommendation: separate Go repo (Go module versioning and
-  proto tag conventions fight monorepos), with this repo pinned to released
-  driver versions.
+- **Repo layout** (decided 2026-07-29): new `gizmodata/gizmosql-adbc`
+  **monorepo** modeled on `apache/arrow-adbc` itself — `go/` (driver + cgo
+  exports) and `python/` (the 2.0 bindings that ship the shared library in
+  their wheels) side by side, released in lockstep by one pipeline. The
+  Python 2.0 sources move to the new repo; the PyPI package name
+  `adbc-driver-gizmosql` is unchanged. This repo remains for 1.x
+  maintenance and gets a pointer README once 2.0 ships.
 - **DDL/DML interception point**: implement `adbc.Statement` wrapping the
   flightsql statement — on `ExecuteQuery`, run the keyword scan; DDL/DML
   goes to `ExecuteUpdate` under the hood, `RETURNING` takes the query path
