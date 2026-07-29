@@ -1,6 +1,16 @@
 # adbc-driver-gizmosql
 A Python [ADBC](https://arrow.apache.org/adbc/) driver for [GizmoSQL](https://gizmodata.com/gizmosql) with OAuth/SSO support
 
+> [!IMPORTANT]
+> **This repo hosts the 1.x (pure-Python) line, which has been superseded.**
+> Development moved to **[gizmodata/gizmosql-adbc](https://github.com/gizmodata/gizmosql-adbc)** —
+> a native Go ADBC driver with Python bindings that ships as
+> [`adbc-driver-gizmosql` 2.0 on the same PyPI package](https://pypi.org/project/adbc-driver-gizmosql/).
+> Upgrading is just `pip install --upgrade adbc-driver-gizmosql` — the 2.0 API is
+> byte-compatible with 1.x (see the
+> [migration guide](https://github.com/gizmodata/gizmosql-adbc/blob/main/docs/migrating-1x-to-2.md)),
+> and the same driver is now loadable from Go, C/C++, R, Node.js, and any ADBC driver manager.
+
 [<img src="https://img.shields.io/badge/GitHub-gizmodata%2Fadbc--driver--gizmosql-blue.svg?logo=Github">](https://github.com/gizmodata/adbc-driver-gizmosql)
 [<img src="https://img.shields.io/badge/GitHub-gizmodata%2Fgizmosql--public-blue.svg?logo=Github">](https://github.com/gizmodata/gizmosql-public)
 [![adbc-driver-gizmosql-ci](https://github.com/gizmodata/adbc-driver-gizmosql/actions/workflows/ci.yml/badge.svg)](https://github.com/gizmodata/adbc-driver-gizmosql/actions/workflows/ci.yml)

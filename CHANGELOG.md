@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- README now points to the successor repo
+  [gizmodata/gizmosql-adbc](https://github.com/gizmodata/gizmosql-adbc),
+  which ships `adbc-driver-gizmosql` 2.0 (native Go driver, byte-compatible
+  Python API) on the same PyPI package. This repo hosts the 1.x line for
+  maintenance only.
+
 ## [1.3.0] - 2026-07-29
 
 ### Added
