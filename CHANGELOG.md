@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- New `gizmosql://` URI scheme — the preferred way to connect.
+  `gizmosql://host:port` is **secure by default** (gRPC with TLS); use
+  `?transport=tcp` for plaintext. `connect()` maps it onto the `flightsql://`
+  scheme introduced in `adbc-driver-flightsql` 1.12.0 (which is also accepted
+  directly), and the legacy `grpc+tls://` / `grpc+tcp://` / `grpc://` schemes
+  remain fully supported. Covered by new unit tests
+  (`TestGizmoSqlUriRewrite`) and integration tests (`TestGizmoSqlUriScheme`),
+  including DDL/DML auto-detection over a `gizmosql://` connection.
+  README examples now use `gizmosql://`.
+
+### Fixed
+- `_extract_host()` now strips any path/query-string component (e.g.
+  `gizmosql://host?transport=tcp`) before extracting the hostname, so OAuth
+  endpoint discovery works with query-parameterized URIs.
+- OpenTelemetry observability, inherited from the upstream 1.12.0 driver:
+  trace spans are now emitted for `Database.Open`, `Prepare`, `ExecuteQuery`,
+  and `ExecuteUpdate`, configurable per-connection via `db_kwargs`
+  (`adbc.telemetry.traces_exporter` = `none`/`otlp`/`console`/`adbcfile`,
+  `adbc.telemetry.traces_folder_path`, `adbc.telemetry.trace_parent` for W3C
+  Trace Context propagation) or the standard `OTEL_*` environment variables.
+  Structured driver logging is available via
+  `ADBC_DRIVER_FLIGHTSQL_LOG_LEVEL` (`debug`/`info`/`warn`/`error`).
+  Documented in the README (Observability section) and covered by a new
+  integration test (`TestOpenTelemetryTracing`) that verifies the `adbcfile`
+  exporter produces trace output for the query path.
+
+### Changed
+- Bumped runtime dependency floors to `adbc-driver-flightsql>=1.12.0` and
+  `adbc-driver-manager>=1.12.0` (ADBC Libraries release 24) — required for
+  the `flightsql://` URI scheme and for tracing to actually be emitted
+  (1.11.0 accepted the telemetry options but did not produce spans) — and
+  `pyarrow>=25.0.0`.
+
 ## [1.2.0] - 2026-07-03
 
 ### Added

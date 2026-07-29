@@ -15,6 +15,7 @@ A Python [ADBC](https://arrow.apache.org/adbc/) driver for [GizmoSQL](https://gi
 - **OAuth/SSO browser flow** — Authenticate via your identity provider (Google, Okta, etc.) with a single parameter change
 - **DBAPI 2.0 interface** — Drop-in replacement for `adbc_driver_flightsql.dbapi`
 - **Minimal dependencies** — Only requires `adbc-driver-flightsql` and `pyarrow`; the OAuth flow uses only Python stdlib
+- **OpenTelemetry tracing & structured logging** — Inherited from `adbc-driver-flightsql` ≥ 1.12.0 (see [Observability](#observability-opentelemetry-tracing--logging))
 
 ## Setup (to run locally)
 
@@ -77,7 +78,7 @@ docker run --name gizmosql \
 ```python
 from adbc_driver_gizmosql import dbapi as gizmosql
 
-with gizmosql.connect("grpc+tls://localhost:31337",
+with gizmosql.connect("gizmosql://localhost:31337",
                       username="gizmosql_user",
                       password="gizmosql_password",
                       tls_skip_verify=True,
@@ -89,6 +90,34 @@ with gizmosql.connect("grpc+tls://localhost:31337",
         print(table)
 ```
 
+### URI schemes
+
+The preferred way to connect is the `gizmosql://` URI scheme, which is
+**secure by default** (gRPC with TLS):
+
+| URI | Meaning |
+|---|---|
+| `gizmosql://host:31337` | gRPC with TLS (default) |
+| `gizmosql://host:31337?transport=tls` | gRPC with TLS (explicit) |
+| `gizmosql://host:31337?transport=tcp` | gRPC plaintext (no TLS) |
+| `grpc+tls://host:31337` | Legacy TLS spelling (still supported) |
+| `grpc+tcp://host:31337` / `grpc://host:31337` | Legacy plaintext spellings (still supported) |
+
+```python
+with gizmosql.connect("gizmosql://localhost:31337",  # TLS by default
+                      username="gizmosql_user",
+                      password="gizmosql_password",
+                      tls_skip_verify=True,
+                      ) as conn:
+    ...
+```
+
+> **Note:** `gizmosql://` requires `adbc-driver-flightsql` ≥ 1.12.0 (this
+> package's floor) — it maps onto the underlying driver's `flightsql://`
+> scheme. In [connection profile](#connection-profiles) TOML files, the
+> `uri` is consumed directly by the underlying driver, so use
+> `grpc+tls://` or `flightsql://` there.
+
 ### DDL/DML — auto-detected and executed immediately
 
 `cursor.execute()` automatically detects DDL/DML statements and executes them
@@ -98,7 +127,7 @@ drivers. No special API is needed — just use `execute()` for everything:
 ```python
 from adbc_driver_gizmosql import dbapi as gizmosql
 
-with gizmosql.connect("grpc+tls://localhost:31337",
+with gizmosql.connect("gizmosql://localhost:31337",
                       username="gizmosql_user",
                       password="gizmosql_password",
                       tls_skip_verify=True,
@@ -126,7 +155,7 @@ When your GizmoSQL server is configured with OAuth, simply change `auth_type`:
 ```python
 from adbc_driver_gizmosql import dbapi as gizmosql
 
-with gizmosql.connect("grpc+tls://gizmosql.example.com:31337",
+with gizmosql.connect("gizmosql://gizmosql.example.com:31337",
                       auth_type="external",
                       tls_skip_verify=True,
                       ) as conn:
@@ -216,7 +245,7 @@ table = pa.table({
     "score": [95.0, 87.5, 91.2],
 })
 
-with gizmosql.connect("grpc+tls://localhost:31337",
+with gizmosql.connect("gizmosql://localhost:31337",
                       username="gizmosql_user",
                       password="gizmosql_password",
                       tls_skip_verify=True,
@@ -232,13 +261,63 @@ with gizmosql.connect("grpc+tls://localhost:31337",
 
 Supported modes: `"create"`, `"append"`, `"replace"`, `"create_append"`.
 
+### Observability: OpenTelemetry tracing & logging
+
+Starting with `adbc-driver-flightsql` 1.12.0 (the floor for this package),
+the underlying Flight SQL driver emits [OpenTelemetry](https://opentelemetry.io/)
+trace spans for the core operations — `Database.Open`, `Prepare`,
+`ExecuteQuery`, and `ExecuteUpdate` — and supports structured logging.
+
+#### Tracing
+
+Enable a trace exporter via `db_kwargs` (per-connection) or the standard
+`OTEL_*` environment variables (process-wide):
+
+```python
+from adbc_driver_gizmosql import dbapi as gizmosql
+
+with gizmosql.connect("gizmosql://localhost:31337",
+                      username="gizmosql_user",
+                      password="gizmosql_password",
+                      tls_skip_verify=True,
+                      db_kwargs={
+                          # one of: none | otlp | console | adbcfile
+                          "adbc.telemetry.traces_exporter": "otlp",
+                      },
+                      ) as conn:
+    ...
+```
+
+| Option key (`db_kwargs`) | Description |
+|---|---|
+| `adbc.telemetry.traces_exporter` | Exporter: `none`, `otlp`, `console`, or `adbcfile` |
+| `adbc.telemetry.traces_folder_path` | Output directory when using the `adbcfile` exporter |
+| `adbc.telemetry.trace_parent` | W3C Trace Context `traceparent` — join your application's existing distributed trace |
+
+With the `otlp` exporter, the standard OpenTelemetry environment variables
+(`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, ...) configure
+the collector endpoint. `OTEL_TRACES_EXPORTER` may also be used instead of the
+database option (the option wins when both are set).
+
+#### Driver logging
+
+Set the log level for the underlying Flight SQL driver via an environment
+variable (great for debugging connection/TLS/auth issues):
+
+```bash
+export ADBC_DRIVER_FLIGHTSQL_LOG_LEVEL=debug   # debug | info | warn | error
+```
+
+See the [Flight SQL driver telemetry docs](https://arrow.apache.org/adbc/current/driver/flight_sql.html)
+for full details.
+
 ### Pandas integration
 
 ```python
 import pandas as pd
 from adbc_driver_gizmosql import dbapi as gizmosql
 
-with gizmosql.connect("grpc+tls://localhost:31337",
+with gizmosql.connect("gizmosql://localhost:31337",
                       username="gizmosql_user",
                       password="gizmosql_password",
                       tls_skip_verify=True,
@@ -253,7 +332,7 @@ with gizmosql.connect("grpc+tls://localhost:31337",
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `uri` | `str` | `None` | Flight SQL URI (e.g., `"grpc+tls://host:31337"`); optional if `profile` supplies it. `"profile://<name>"` is also accepted |
+| `uri` | `str` | `None` | Server URI (e.g., `"gizmosql://host:31337"` — TLS by default; `grpc+tls://`, `grpc+tcp://`, and `flightsql://` also accepted); optional if `profile` supplies it. `"profile://<name>"` is also accepted |
 | `profile` | `str` | `None` | ADBC connection profile — a bare name resolved via the standard search paths (incl. `ADBC_PROFILE_PATH`) or an absolute path to a `.toml` file. At least one of `uri`/`profile` is required |
 | `username` | `str` | `None` | Username for password auth |
 | `password` | `str` | `None` | Password for password auth |

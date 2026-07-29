@@ -11,7 +11,7 @@ Example (password auth)::
 
     from adbc_driver_gizmosql import dbapi as gizmosql
 
-    with gizmosql.connect("grpc+tls://localhost:31337",
+    with gizmosql.connect("gizmosql://localhost:31337",
                           username="user", password="pass",
                           tls_skip_verify=True) as conn:
         with conn.cursor() as cur:
@@ -22,7 +22,7 @@ Example (DDL/DML — auto-detected and executed immediately)::
 
     from adbc_driver_gizmosql import dbapi as gizmosql
 
-    with gizmosql.connect("grpc+tls://localhost:31337",
+    with gizmosql.connect("gizmosql://localhost:31337",
                           username="user", password="pass",
                           tls_skip_verify=True) as conn:
         with conn.cursor() as cur:
@@ -35,7 +35,7 @@ Example (OAuth/SSO)::
 
     from adbc_driver_gizmosql import dbapi as gizmosql
 
-    with gizmosql.connect("grpc+tls://localhost:31337",
+    with gizmosql.connect("gizmosql://localhost:31337",
                           auth_type="external",
                           tls_skip_verify=True) as conn:
         with conn.cursor() as cur:
@@ -402,9 +402,12 @@ def connect(
             ...
 
     Args:
-        uri: Flight SQL URI (e.g., ``"grpc+tls://localhost:31337"``).
-            Optional if ``profile`` supplies the URI. A ``profile://<name>``
-            URI is also accepted and is equivalent to ``profile=<name>``.
+        uri: Server URI (e.g., ``"gizmosql://localhost:31337"``, which uses
+            TLS by default; append ``?transport=tcp`` for plaintext). The
+            underlying Flight SQL schemes (``grpc+tls://``, ``grpc+tcp://``,
+            ``flightsql://``) are also accepted. Optional if ``profile``
+            supplies the URI. A ``profile://<name>`` URI is also accepted
+            and is equivalent to ``profile=<name>``.
         profile: Name of an ADBC connection profile to load (a bare name
             resolved against the standard ADBC profile search paths —
             including ``$ADBC_PROFILE_PATH`` — or an absolute path to a
@@ -442,6 +445,12 @@ def connect(
     """
     if uri is None and profile is None:
         raise ValueError("Must provide at least one of 'uri' or 'profile'.")
+
+    # gizmosql:// is this driver's preferred URI scheme. It maps 1:1 onto
+    # the underlying driver's flightsql:// scheme (TLS by default;
+    # ?transport=tcp for plaintext, requires adbc-driver-flightsql >= 1.12.0).
+    if uri is not None and uri.startswith("gizmosql://"):
+        uri = "flightsql://" + uri[len("gizmosql://") :]
 
     if db_kwargs is None:
         db_kwargs = {}
@@ -553,6 +562,9 @@ def _extract_host(uri: str) -> str:
         remainder = uri.split("://", 1)[1]
     else:
         remainder = uri
+
+    # Remove path and query string (e.g. gizmosql://host:port?transport=tcp)
+    remainder = remainder.split("/", 1)[0].split("?", 1)[0]
 
     # Remove port
     if ":" in remainder:

@@ -205,6 +205,47 @@ class TestConnect:
         )
 
 
+class TestGizmoSqlUriRewrite:
+    """gizmosql:// URIs are rewritten to the underlying flightsql:// scheme."""
+
+    @patch(_PATCH_CLS)
+    @patch(_PATCH_CONN)
+    @patch(_PATCH_DB)
+    def test_gizmosql_scheme_rewritten(self, mock_db_connect, mock_adbc_conn, mock_conn_cls):
+        from adbc_driver_gizmosql.dbapi import connect
+
+        mock_conn_cls.return_value = MagicMock()
+        connect("gizmosql://localhost:31337", username="u", password="p")
+        assert mock_db_connect.call_args[0][0] == "flightsql://localhost:31337"
+
+    @patch(_PATCH_CLS)
+    @patch(_PATCH_CONN)
+    @patch(_PATCH_DB)
+    def test_gizmosql_scheme_preserves_query_params(
+        self, mock_db_connect, mock_adbc_conn, mock_conn_cls
+    ):
+        from adbc_driver_gizmosql.dbapi import connect
+
+        mock_conn_cls.return_value = MagicMock()
+        connect("gizmosql://localhost:31337?transport=tcp", username="u", password="p")
+        assert mock_db_connect.call_args[0][0] == "flightsql://localhost:31337?transport=tcp"
+
+    @patch(_PATCH_CLS)
+    @patch(_PATCH_CONN)
+    @patch(_PATCH_DB)
+    def test_other_schemes_untouched(self, mock_db_connect, mock_adbc_conn, mock_conn_cls):
+        from adbc_driver_gizmosql.dbapi import connect
+
+        mock_conn_cls.return_value = MagicMock()
+        for uri in (
+            "grpc+tls://localhost:31337",
+            "grpc+tcp://localhost:31337",
+            "flightsql://localhost:31337",
+        ):
+            connect(uri, username="u", password="p")
+            assert mock_db_connect.call_args[0][0] == uri
+
+
 class TestConnectProfile:
     """Tests for ADBC connection profile support in dbapi.connect()."""
 
@@ -624,3 +665,14 @@ class TestExtractHost:
         from adbc_driver_gizmosql.dbapi import _extract_host
 
         assert _extract_host("grpc+tcp://192.168.1.1:31337") == "192.168.1.1"
+
+    def test_gizmosql_scheme(self):
+        from adbc_driver_gizmosql.dbapi import _extract_host
+
+        assert _extract_host("gizmosql://gizmosql.example.com:31337") == "gizmosql.example.com"
+
+    def test_query_string_stripped(self):
+        from adbc_driver_gizmosql.dbapi import _extract_host
+
+        assert _extract_host("gizmosql://myhost:31337?transport=tcp") == "myhost"
+        assert _extract_host("gizmosql://myhost?transport=tcp") == "myhost"

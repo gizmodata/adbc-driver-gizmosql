@@ -690,3 +690,94 @@ class TestConnectionProfiles:
 
         with pytest.raises(Exception, match="(?i)profile"):
             gizmosql.connect(profile="does_not_exist_profile")
+
+
+class TestGizmoSqlUriScheme:
+    """The gizmosql:// URI scheme (mapped onto flightsql://, added upstream in 1.12.0)."""
+
+    def test_connect_with_gizmosql_uri(self, gizmosql_server):
+        """gizmosql://host:port defaults to TLS and connects like grpc+tls://."""
+        from conftest import GIZMOSQL_PASSWORD, GIZMOSQL_USERNAME
+
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        uri = f"gizmosql://{gizmosql_server.host}:{gizmosql_server.port}"
+        with gizmosql.connect(
+            uri,
+            username=GIZMOSQL_USERNAME,
+            password=GIZMOSQL_PASSWORD,
+            tls_skip_verify=True,
+        ) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 AS value")
+                assert cur.fetch_arrow_table().column("value")[0].as_py() == 1
+
+    def test_ddl_dml_routing_with_gizmosql_uri(self, gizmosql_server):
+        """DDL/DML auto-detection works over a gizmosql:// connection."""
+        from conftest import GIZMOSQL_PASSWORD, GIZMOSQL_USERNAME
+
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        uri = f"gizmosql://{gizmosql_server.host}:{gizmosql_server.port}"
+        with gizmosql.connect(
+            uri,
+            username=GIZMOSQL_USERNAME,
+            password=GIZMOSQL_PASSWORD,
+            tls_skip_verify=True,
+        ) as conn:
+            with conn.cursor() as cur:
+                cur.execute("CREATE TABLE test_gizmosql_uri (id INT)")
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("INSERT INTO test_gizmosql_uri VALUES (1), (2)")
+                    assert cur.rowcount == 2
+            finally:
+                with conn.cursor() as cur:
+                    cur.execute_update("DROP TABLE test_gizmosql_uri")
+
+    def test_connect_with_flightsql_uri_passthrough(self, gizmosql_server):
+        """The underlying flightsql:// scheme still works when given directly."""
+        from conftest import GIZMOSQL_PASSWORD, GIZMOSQL_USERNAME
+
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        uri = f"flightsql://{gizmosql_server.host}:{gizmosql_server.port}"
+        with gizmosql.connect(
+            uri,
+            username=GIZMOSQL_USERNAME,
+            password=GIZMOSQL_PASSWORD,
+            tls_skip_verify=True,
+        ) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 AS value")
+                assert cur.fetch_arrow_table().column("value")[0].as_py() == 1
+
+
+class TestOpenTelemetryTracing:
+    """OpenTelemetry tracing wired into the Flight SQL query path in 1.12.0."""
+
+    def test_adbcfile_exporter_writes_traces(self, gizmosql_server, gizmosql_uri, tmp_path):
+        """Passing adbc.telemetry.* options via db_kwargs produces trace files."""
+        from conftest import GIZMOSQL_PASSWORD, GIZMOSQL_USERNAME
+
+        from adbc_driver_gizmosql import dbapi as gizmosql
+
+        traces_dir = tmp_path / "traces"
+        traces_dir.mkdir()
+        with gizmosql.connect(
+            gizmosql_uri,
+            username=GIZMOSQL_USERNAME,
+            password=GIZMOSQL_PASSWORD,
+            tls_skip_verify=True,
+            db_kwargs={
+                "adbc.telemetry.traces_exporter": "adbcfile",
+                "adbc.telemetry.traces_folder_path": str(traces_dir),
+            },
+        ) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 AS value")
+                cur.fetch_arrow_table()
+        trace_files = list(traces_dir.iterdir())
+        assert trace_files, "expected the adbcfile exporter to write trace output"
+        contents = "".join(f.read_text() for f in trace_files)
+        assert "ExecuteQuery" in contents or "execute" in contents.lower()
